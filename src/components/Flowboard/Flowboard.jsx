@@ -17,7 +17,7 @@ import {
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import { useDnD } from '../../contexts/DnDContext';
-import ExecuteNode from '../nodes/ExecuteNode';
+import { ExecuteNode, TextNode } from '../nodes'; // Using the new export structure
 import ConsoleWindow from '../ui/Console';
 import '@xyflow/react/dist/style.css';
 
@@ -250,12 +250,13 @@ const CustomEdge = ({
   );
 };
 
-// Node types with ExecuteNode
+// Updated node types with new custom nodes for workflow automation[1]
 const nodeTypes = {
   input: InputNode,
   default: CustomNode,
   output: OutputNode,
   execute: ExecuteNode,
+  text: TextNode,
 };
 
 const edgeTypes = {
@@ -274,7 +275,7 @@ const FlowboardComponent = () => {
 
   const { onConnect, onConnectEnd } = useNodeOperations(setNodes, setEdges);
 
-  // Generate truly unique ID using state and timestamp
+  // Generate truly unique ID to prevent React key duplication errors[3]
   const generateUniqueId = useCallback(() => {
     const newCounter = nodeCounter + 1;
     setNodeCounter(newCounter);
@@ -282,12 +283,11 @@ const FlowboardComponent = () => {
     return uniqueId;
   }, [nodeCounter]);
 
-  // Cascading execution function for workflow automation[3]
+  // Cascading execution function for workflow automation[1]
   const triggerNodeExecution = useCallback(async (nodeId) => {
     const currentEdges = getEdges();
     const currentNodes = getNodes();
 
-    // Find all edges that start from this node
     const outgoingEdges = currentEdges.filter(edge => edge.source === nodeId);
 
     if (outgoingEdges.length === 0) {
@@ -297,20 +297,17 @@ const FlowboardComponent = () => {
 
     console.log(`🔗 Node ${nodeId} triggering ${outgoingEdges.length} connected node(s)`);
 
-    // Execute each connected node after a delay
     for (const edge of outgoingEdges) {
       const targetNode = currentNodes.find(node => node.id === edge.target);
       if (targetNode) {
         setTimeout(() => {
           if (targetNode.type === 'execute') {
-            // Trigger ExecuteNode
             console.log(`🎯 Auto-triggering ExecuteNode: ${targetNode.id}`);
             window.dispatchEvent(new CustomEvent('triggerExecution', {
               detail: { nodeId: targetNode.id }
             }));
           } else {
-            // For regular nodes, show execution animation
-            console.log(`⚡ Executing regular node: ${targetNode.data.label}`);
+            console.log(`⚡ Executing ${targetNode.type} node: ${targetNode.data.label}`);
             setNodes((nodes) =>
               nodes.map((node) => {
                 if (node.id === targetNode.id) {
@@ -327,7 +324,6 @@ const FlowboardComponent = () => {
               })
             );
 
-            // Reset after animation and continue chain
             setTimeout(() => {
               setNodes((nodes) =>
                 nodes.map((node) => {
@@ -344,11 +340,10 @@ const FlowboardComponent = () => {
                 })
               );
 
-              // Continue the execution chain
               triggerNodeExecution(targetNode.id);
             }, 1000);
           }
-        }, 500); // Delay between executions
+        }, 500);
       }
     }
   }, [getEdges, getNodes, setNodes]);
@@ -382,7 +377,7 @@ const FlowboardComponent = () => {
         data: { label: `${droppedType} node` },
       };
 
-      // Console monitoring for your development workflow[2]
+      // Console monitoring for development workflow[2]
       console.log(`➕ Added new ${droppedType} node`);
 
       setNodes((currentNodes) => {
@@ -453,7 +448,7 @@ const FlowboardComponent = () => {
     );
   }, [setEdges]);
 
-  // Listen for execution completion events for workflow automation[3]
+  // Listen for execution completion events for workflow automation[1]
   React.useEffect(() => {
     const handleExecutionComplete = (event) => {
       const { nodeId } = event.detail;
