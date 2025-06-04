@@ -16,38 +16,14 @@ const NodesTab = () => {
   const [type, setType] = useDnD();
 
   const onDragStart = (event, nodeType) => {
-    console.log('🚀 DRAG START - Node Type:', nodeType);
-    console.log('🚀 DRAG START - Event:', event);
-    console.log('🚀 DRAG START - DataTransfer:', event.dataTransfer);
-
-    try {
-      // Set multiple data formats for compatibility
-      event.dataTransfer.setData('application/reactflow', nodeType);
-      event.dataTransfer.setData('text/plain', nodeType);
-      event.dataTransfer.setData('application/json', JSON.stringify({ type: nodeType }));
-
-      console.log('✅ DRAG START - Data set successfully');
-      console.log('🚀 DRAG START - DataTransfer types:', event.dataTransfer.types);
-
-      // Set context
-      setType(nodeType);
-      console.log('✅ DRAG START - Context type set to:', nodeType);
-
-      // Set effect
-      event.dataTransfer.effectAllowed = 'move';
-      console.log('✅ DRAG START - Effect allowed set to: move');
-
-    } catch (error) {
-      console.error('❌ DRAG START - Error:', error);
-    }
+    setType(nodeType);
+    event.dataTransfer.setData('application/reactflow', nodeType);
+    event.dataTransfer.setData('text/plain', nodeType);
+    event.dataTransfer.effectAllowed = 'move';
   };
 
-  const onDragEnd = (event) => {
-    console.log('🏁 DRAG END - Event:', event);
-    console.log('🏁 DRAG END - Drop effect:', event.dataTransfer.dropEffect);
-    // Clear the type after drag ends
+  const onDragEnd = () => {
     setType(null);
-    console.log('🏁 DRAG END - Context type cleared');
   };
 
   const nodeTypes = [
@@ -81,9 +57,6 @@ const NodesTab = () => {
         <p className="text-sm text-gray-600">
           Drag nodes to the canvas to build your workflow
         </p>
-        <div className="mt-2 p-2 bg-yellow-50 rounded text-xs">
-          <strong>Debug Info:</strong> Current DnD Type: {type || 'null'}
-        </div>
       </div>
 
       <div className="space-y-3">
@@ -109,6 +82,7 @@ const NodesTab = () => {
     </div>
   );
 };
+
 
 const TabbedSidebar = () => {
   const [activeTab, setActiveTab] = useState('nodes'); // Start with nodes tab
@@ -206,8 +180,6 @@ const TabbedSidebar = () => {
           </>
         )}
       </aside>
-
-      // Remove or modify the backdrop to not interfere with drag events
       {isVisible && !isCollapsed && (
         <div
           className="fixed inset-0 bg-black/10 z-30 transition-opacity duration-300"
