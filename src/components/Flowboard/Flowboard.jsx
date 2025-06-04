@@ -122,6 +122,7 @@ const OutputNode = ({ id, data, isConnectable, selected }) => {
 };
 
 // Custom Edge Component (same as before)
+// Update your Custom Edge Component to include proper arrow markers
 const CustomEdge = ({
   id,
   sourceX,
@@ -152,9 +153,28 @@ const CustomEdge = ({
 
   return (
     <>
+      {/* Add custom arrow marker definition */}
+      <defs>
+        <marker
+          id={`arrow-${id}`}
+          markerWidth="12"
+          markerHeight="12"
+          refX="10"
+          refY="3"
+          orient="auto"
+          markerUnits="strokeWidth"
+        >
+          <path
+            d="M0,0 L0,6 L9,3 z"
+            fill={isHovered ? '#ef4444' : '#6b7280'}
+            stroke={isHovered ? '#ef4444' : '#6b7280'}
+          />
+        </marker>
+      </defs>
+
       <BaseEdge
         path={edgePath}
-        markerEnd={markerEnd}
+        markerEnd={`url(#arrow-${id})`}
         style={{
           ...style,
           strokeWidth: isHovered ? 3 : 2,
@@ -194,7 +214,6 @@ const CustomEdge = ({
   );
 };
 
-// Move outside component to prevent recreation
 const nodeTypes = {
   input: InputNode,
   default: CustomNode,

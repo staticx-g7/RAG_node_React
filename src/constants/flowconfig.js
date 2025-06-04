@@ -20,9 +20,30 @@ export const INITIAL_NODES = [
 ];
 
 export const INITIAL_EDGES = [
-  { id: 'e1-2', source: '1', target: '2', type: 'custom', sourceHandle: 'bottom', targetHandle: 'top' },
-  { id: 'e2-3', source: '2', target: '3', type: 'custom', sourceHandle: 'bottom', targetHandle: 'top' },
+  {
+    id: 'e1-2',
+    source: '1',
+    target: '2',
+    type: 'custom',
+    sourceHandle: 'bottom',
+    targetHandle: 'top',
+    markerEnd: {
+      type: 'arrowclosed',
+    }
+  },
+  {
+    id: 'e2-3',
+    source: '2',
+    target: '3',
+    type: 'custom',
+    sourceHandle: 'bottom',
+    targetHandle: 'top',
+    markerEnd: {
+      type: 'arrowclosed',
+    }
+  },
 ];
+
 
 export const FLOW_CONFIG = {
   fitViewOptions: { padding: 0.2 },
