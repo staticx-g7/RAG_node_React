@@ -15,6 +15,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
     const edges = getEdges();
     const nodes = getNodes();
 
+    // Find all edges that start from this node
     const outgoingEdges = edges.filter(edge => edge.source === id);
 
     if (outgoingEdges.length === 0) {
@@ -24,11 +25,13 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
 
     console.log(`▶️ Executing ${outgoingEdges.length} connected node(s) from ${data.label || 'Execute Node'}`);
 
+    // Execute each connected node
     for (const edge of outgoingEdges) {
       const targetNode = nodes.find(node => node.id === edge.target);
       if (targetNode) {
         console.log(`✅ Processing: ${targetNode.data.label}`);
 
+        // Update the target node to show it's being executed
         setNodes((nodes) =>
           nodes.map((node) => {
             if (node.id === targetNode.id) {
@@ -46,10 +49,12 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
           })
         );
 
+        // Simulate execution delay
         await new Promise(resolve => setTimeout(resolve, 500));
 
         console.log(`🎉 Completed: ${targetNode.data.label}`);
 
+        // Reset execution state and trigger cascading execution
         setNodes((nodes) =>
           nodes.map((node) => {
             if (node.id === targetNode.id) {
@@ -65,6 +70,13 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
             return node;
           })
         );
+
+        // Trigger cascading execution for workflow automation
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('executionComplete', {
+            detail: { nodeId: targetNode.id }
+          }));
+        }, 100);
       }
     }
 
@@ -86,20 +98,38 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
     setIsExecuting(false);
   };
 
+  // Listen for auto-execution triggers from other nodes
+  React.useEffect(() => {
+    const handleTriggerExecution = (event) => {
+      if (event.detail.nodeId === id) {
+        console.log(`🎯 Auto-triggering execution for ExecuteNode: ${id}`);
+        handleExecute({ stopPropagation: () => {} });
+      }
+    };
+
+    window.addEventListener('triggerExecution', handleTriggerExecution);
+
+    return () => {
+      window.removeEventListener('triggerExecution', handleTriggerExecution);
+    };
+  }, [id]);
+
   return (
     <motion.div
       className={`relative w-32 h-20 border-2 rounded-xl shadow-lg transition-all duration-200 group ${
         selected ? 'border-purple-600 ring-2 ring-purple-200' : 'border-purple-400'
       }`}
+      // Animated background color transition for visual feedback
       animate={{
         background: isExecuting
-          ? 'linear-gradient(135deg, #fecaca 0%, #ef4444 50%, #dc2626 100%)'
-          : 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 50%, #86efac 100%)'
+          ? 'linear-gradient(135deg, #fecaca 0%, #ef4444 50%, #dc2626 100%)' // Red gradient when executing
+          : 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 50%, #86efac 100%)'  // Green gradient when idle
       }}
       transition={{
         duration: 0.6,
         ease: "easeInOut"
       }}
+      // Pulse animation during execution
       style={{
         scale: isExecuting ? [1, 1.05, 1] : 1,
       }}
@@ -115,7 +145,8 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         ×
       </button>
 
-      {/* HANDLES */}
+      {/* HANDLES - One per side for clean connectivity */}
+      {/* Top Handle - Input (Blue) */}
       <Handle
         type="target"
         position={Position.Top}
@@ -130,21 +161,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         }}
       />
 
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="left"
-        isConnectable={isConnectable}
-        style={{
-          background: '#3b82f6',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          zIndex: 10
-        }}
-      />
-
-      {/* OUTPUT HANDLES (green) - these send connections */}
+      {/* Right Handle - Output (Green) */}
       <Handle
         type="source"
         position={Position.Right}
@@ -159,6 +176,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         }}
       />
 
+      {/* Bottom Handle - Output (Green) */}
       <Handle
         type="source"
         position={Position.Bottom}
@@ -173,6 +191,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         }}
       />
 
+      {/* Left Handle - Input (Blue) */}
       <Handle
         type="target"
         position={Position.Left}
@@ -187,7 +206,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         }}
       />
 
-      {/* Button container */}
+      {/* Centered Execute Button */}
       <div className="absolute inset-0 flex items-center justify-center p-2" style={{ zIndex: 1 }}>
         <motion.button
           onClick={handleExecute}
@@ -230,6 +249,22 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
           )}
         </motion.button>
       </div>
+
+      {/* Animated status indicator */}
+      <motion.div
+        className="absolute -bottom-1 left-1/2 transform -translate-x-1/2"
+        animate={{
+          scale: isExecuting ? [1, 1.2, 1] : 0,
+          opacity: isExecuting ? [0.8, 1, 0.8] : 0
+        }}
+        transition={{
+          duration: 0.8,
+          repeat: isExecuting ? Infinity : 0,
+          ease: "easeInOut"
+        }}
+      >
+        <div className={`w-2 h-2 rounded-full ${isExecuting ? 'bg-red-500' : 'bg-green-500'}`} />
+      </motion.div>
     </motion.div>
   );
 };

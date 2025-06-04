@@ -268,7 +268,7 @@ const FlowboardComponent = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState(
     INITIAL_EDGES.map(edge => ({ ...edge, type: 'custom' }))
   );
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getEdges, getNodes } = useReactFlow();
   const [type] = useDnD();
   const [nodeCounter, setNodeCounter] = useState(4);
 
@@ -282,12 +282,82 @@ const FlowboardComponent = () => {
     return uniqueId;
   }, [nodeCounter]);
 
+  // Cascading execution function for workflow automation[3]
+  const triggerNodeExecution = useCallback(async (nodeId) => {
+    const currentEdges = getEdges();
+    const currentNodes = getNodes();
+
+    // Find all edges that start from this node
+    const outgoingEdges = currentEdges.filter(edge => edge.source === nodeId);
+
+    if (outgoingEdges.length === 0) {
+      console.log(`📍 Node ${nodeId} has no connected nodes to execute`);
+      return;
+    }
+
+    console.log(`🔗 Node ${nodeId} triggering ${outgoingEdges.length} connected node(s)`);
+
+    // Execute each connected node after a delay
+    for (const edge of outgoingEdges) {
+      const targetNode = currentNodes.find(node => node.id === edge.target);
+      if (targetNode) {
+        setTimeout(() => {
+          if (targetNode.type === 'execute') {
+            // Trigger ExecuteNode
+            console.log(`🎯 Auto-triggering ExecuteNode: ${targetNode.id}`);
+            window.dispatchEvent(new CustomEvent('triggerExecution', {
+              detail: { nodeId: targetNode.id }
+            }));
+          } else {
+            // For regular nodes, show execution animation
+            console.log(`⚡ Executing regular node: ${targetNode.data.label}`);
+            setNodes((nodes) =>
+              nodes.map((node) => {
+                if (node.id === targetNode.id) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      isExecuting: true,
+                      lastExecuted: new Date().toISOString()
+                    }
+                  };
+                }
+                return node;
+              })
+            );
+
+            // Reset after animation and continue chain
+            setTimeout(() => {
+              setNodes((nodes) =>
+                nodes.map((node) => {
+                  if (node.id === targetNode.id) {
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        isExecuting: false
+                      }
+                    };
+                  }
+                  return node;
+                })
+              );
+
+              // Continue the execution chain
+              triggerNodeExecution(targetNode.id);
+            }, 1000);
+          }
+        }, 500); // Delay between executions
+      }
+    }
+  }, [getEdges, getNodes, setNodes]);
+
   const onDragOver = useCallback((event) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
-  // SINGLE onDrop function - no duplicates
   const onDrop = useCallback(
     (event) => {
       event.preventDefault();
@@ -312,7 +382,7 @@ const FlowboardComponent = () => {
         data: { label: `${droppedType} node` },
       };
 
-      // Simple creation log for your console monitoring preference[2]
+      // Console monitoring for your development workflow[2]
       console.log(`➕ Added new ${droppedType} node`);
 
       setNodes((currentNodes) => {
@@ -346,9 +416,8 @@ const FlowboardComponent = () => {
       const selectedEdges = edges.filter((edge) => edge.selected);
 
       if (selectedNodes.length > 0) {
-        const selectedNodeIds = selectedNodes.map((node) => node.id);
         console.log(`🗑️ Deleted ${selectedNodes.length} selected node(s)`);
-
+        const selectedNodeIds = selectedNodes.map((node) => node.id);
         setNodes((nodes) => nodes.filter((node) => !node.selected));
         setEdges((edges) => edges.filter((edge) =>
           !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
@@ -384,8 +453,13 @@ const FlowboardComponent = () => {
     );
   }, [setEdges]);
 
-  // Listen for delete events
+  // Listen for execution completion events for workflow automation[3]
   React.useEffect(() => {
+    const handleExecutionComplete = (event) => {
+      const { nodeId } = event.detail;
+      triggerNodeExecution(nodeId);
+    };
+
     const handleDeleteNode = (event) => {
       onDeleteNode(event.detail.id);
     };
@@ -394,14 +468,16 @@ const FlowboardComponent = () => {
       onDeleteEdge(event.detail.id);
     };
 
+    window.addEventListener('executionComplete', handleExecutionComplete);
     window.addEventListener('deleteNode', handleDeleteNode);
     window.addEventListener('deleteEdge', handleDeleteEdge);
 
     return () => {
+      window.removeEventListener('executionComplete', handleExecutionComplete);
       window.removeEventListener('deleteNode', handleDeleteNode);
       window.removeEventListener('deleteEdge', handleDeleteEdge);
     };
-  }, [onDeleteNode, onDeleteEdge]);
+  }, [triggerNodeExecution, onDeleteNode, onDeleteEdge]);
 
   return (
     <div
@@ -457,6 +533,7 @@ const FlowboardComponent = () => {
         />
       </ReactFlow>
 
+      {/* Floating Console Window for development monitoring[2] */}
       <ConsoleWindow containerRef={reactFlowWrapper} />
     </div>
   );
