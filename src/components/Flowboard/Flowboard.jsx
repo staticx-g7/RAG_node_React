@@ -19,54 +19,109 @@ import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowc
 import { useDnD } from '../../contexts/DnDContext';
 import '@xyflow/react/dist/style.css';
 
-// Custom Node Components
-const CustomNode = ({ data, isConnectable }) => (
-  <div className="px-4 py-2 shadow-md rounded-md bg-white border-2 border-stone-400">
-    <Handle
-      type="target"
-      position={Position.Top}
-      id="top"
-      style={{ background: '#555' }}
-      isConnectable={isConnectable}
-    />
-    <div>{data.label}</div>
-    <Handle
-      type="source"
-      position={Position.Bottom}
-      id="bottom"
-      style={{ background: '#555' }}
-      isConnectable={isConnectable}
-    />
-  </div>
-);
+// Custom Node Components with Delete Icons
+const CustomNode = ({ id, data, isConnectable, selected }) => {
+  const handleDelete = (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
+  };
 
-const InputNode = ({ data, isConnectable }) => (
-  <div className="px-4 py-2 shadow-md rounded-md bg-green-50 border-2 border-green-400">
-    <div>{data.label}</div>
-    <Handle
-      type="source"
-      position={Position.Bottom}
-      id="bottom"
-      style={{ background: '#22c55e' }}
-      isConnectable={isConnectable}
-    />
-  </div>
-);
+  return (
+    <div className={`relative px-4 py-2 shadow-md rounded-md bg-white border-2 transition-all duration-200 ${
+      selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-stone-400'
+    }`}>
+      {/* Delete button - only show on hover or when selected */}
+      <button
+        onClick={handleDelete}
+        className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
+          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }`}
+        title="Delete node"
+      >
+        ×
+      </button>
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{ background: '#555' }}
+        isConnectable={isConnectable}
+      />
+      <div>{data.label}</div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bottom"
+        style={{ background: '#555' }}
+        isConnectable={isConnectable}
+      />
+    </div>
+  );
+};
 
-const OutputNode = ({ data, isConnectable }) => (
-  <div className="px-4 py-2 shadow-md rounded-md bg-red-50 border-2 border-red-400">
-    <Handle
-      type="target"
-      position={Position.Top}
-      id="top"
-      style={{ background: '#ef4444' }}
-      isConnectable={isConnectable}
-    />
-    <div>{data.label}</div>
-  </div>
-);
+const InputNode = ({ id, data, isConnectable, selected }) => {
+  const handleDelete = (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
+  };
 
-// Custom Edge Component
+  return (
+    <div className={`relative px-4 py-2 shadow-md rounded-md bg-green-50 border-2 transition-all duration-200 group ${
+      selected ? 'border-green-600 ring-2 ring-green-200' : 'border-green-400'
+    }`}>
+      <button
+        onClick={handleDelete}
+        className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
+          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }`}
+        title="Delete node"
+      >
+        ×
+      </button>
+      <div>{data.label}</div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bottom"
+        style={{ background: '#22c55e' }}
+        isConnectable={isConnectable}
+      />
+    </div>
+  );
+};
+
+const OutputNode = ({ id, data, isConnectable, selected }) => {
+  const handleDelete = (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
+  };
+
+  return (
+    <div className={`relative px-4 py-2 shadow-md rounded-md bg-red-50 border-2 transition-all duration-200 group ${
+      selected ? 'border-red-600 ring-2 ring-red-200' : 'border-red-400'
+    }`}>
+      <button
+        onClick={handleDelete}
+        className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
+          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }`}
+        title="Delete node"
+      >
+        ×
+      </button>
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="top"
+        style={{ background: '#ef4444' }}
+        isConnectable={isConnectable}
+      />
+      <div>{data.label}</div>
+    </div>
+  );
+};
+
+// Custom Edge Component (same as before)
 const CustomEdge = ({
   id,
   sourceX,
@@ -197,9 +252,38 @@ const FlowboardComponent = () => {
     [screenToFlowPosition, type, setNodes]
   );
 
+  // Handle node deletion
+  const onDeleteNode = useCallback((nodeId) => {
+    setNodes((nodes) => nodes.filter((node) => node.id !== nodeId));
+    // Also remove connected edges
+    setEdges((edges) => edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
+  }, [setNodes, setEdges]);
+
+  // Handle edge deletion
   const onDeleteEdge = useCallback((edgeId) => {
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
+
+  // Handle keyboard deletion
+  const onKeyDown = useCallback((event) => {
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      const selectedNodes = nodes.filter((node) => node.selected);
+      const selectedEdges = edges.filter((edge) => edge.selected);
+
+      if (selectedNodes.length > 0) {
+        const selectedNodeIds = selectedNodes.map((node) => node.id);
+        setNodes((nodes) => nodes.filter((node) => !node.selected));
+        // Remove edges connected to deleted nodes
+        setEdges((edges) => edges.filter((edge) =>
+          !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
+        ));
+      }
+
+      if (selectedEdges.length > 0) {
+        setEdges((edges) => edges.filter((edge) => !edge.selected));
+      }
+    }
+  }, [nodes, edges, setNodes, setEdges]);
 
   const onEdgeMouseEnter = useCallback((event, edge) => {
     setEdges((edges) =>
@@ -223,16 +307,24 @@ const FlowboardComponent = () => {
     );
   }, [setEdges]);
 
+  // Listen for delete events
   React.useEffect(() => {
+    const handleDeleteNode = (event) => {
+      onDeleteNode(event.detail.id);
+    };
+
     const handleDeleteEdge = (event) => {
       onDeleteEdge(event.detail.id);
     };
 
+    window.addEventListener('deleteNode', handleDeleteNode);
     window.addEventListener('deleteEdge', handleDeleteEdge);
+
     return () => {
+      window.removeEventListener('deleteNode', handleDeleteNode);
       window.removeEventListener('deleteEdge', handleDeleteEdge);
     };
-  }, [onDeleteEdge]);
+  }, [onDeleteNode, onDeleteEdge]);
 
   return (
     <div
@@ -240,7 +332,8 @@ const FlowboardComponent = () => {
       ref={reactFlowWrapper}
       onDrop={onDrop}
       onDragOver={onDragOver}
-      style={{ margin: 0 }} // Remove any default margins
+      onKeyDown={onKeyDown}
+      tabIndex={0}
     >
       <ReactFlow
         nodes={nodes}
@@ -260,6 +353,7 @@ const FlowboardComponent = () => {
         snapToGrid={true}
         snapGrid={[20, 20]}
         connectionMode="loose"
+        deleteKeyCode={['Delete', 'Backspace']}
       >
         <Background
           variant="lines"
