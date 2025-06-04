@@ -10,7 +10,6 @@ import {
   getBezierPath,
   EdgeLabelRenderer,
   BaseEdge,
-  addEdge,
   useReactFlow,
 } from '@xyflow/react';
 import { useNodeOperations } from '../../hooks/useNodeOperations';
@@ -189,53 +188,16 @@ const FlowboardComponent = () => {
     };
   }, [onDeleteEdge]);
 
-  // Handle node deletion
-  const onNodesDelete = useCallback(
-    (deleted) => {
-      setEdges((edges) =>
-        edges.filter((edge) => !deleted.find((node) => node.id === edge.source || node.id === edge.target))
-      );
-    },
-    [setEdges]
-  );
-
-  // Handle keyboard events for deletion
-  const onKeyDown = useCallback(
-    (event) => {
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        const selectedNodes = nodes.filter((node) => node.selected);
-        const selectedEdges = edges.filter((edge) => edge.selected);
-
-        if (selectedNodes.length > 0) {
-          setNodes((nodes) => nodes.filter((node) => !node.selected));
-          setEdges((edges) =>
-            edges.filter((edge) =>
-              !selectedNodes.find((node) => node.id === edge.source || node.id === edge.target)
-            )
-          );
-        }
-
-        if (selectedEdges.length > 0) {
-          setEdges((edges) => edges.filter((edge) => !edge.selected));
-        }
-      }
-    },
-    [nodes, edges, setNodes, setEdges]
-  );
-
   return (
     <div
-      className="w-full h-full bg-gray-50"
+      className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200"
       ref={reactFlowWrapper}
-      onKeyDown={onKeyDown}
-      tabIndex={0}
     >
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodesDelete={onNodesDelete}
         onConnect={onConnect}
         onConnectEnd={onConnectEnd}
         onPaneDoubleClick={onPaneDoubleClick}
@@ -247,21 +209,29 @@ const FlowboardComponent = () => {
         fitView
         fitViewOptions={FLOW_CONFIG.fitViewOptions}
         nodeOrigin={FLOW_CONFIG.nodeOrigin}
-        className="bg-gray-50"
-        deleteKeyCode={['Delete', 'Backspace']}
+        className="rounded-xl"
       >
+        {/* Multiple layered backgrounds for a sophisticated grid */}
         <Background
-          variant={FLOW_CONFIG.backgroundVariant}
-          gap={FLOW_CONFIG.backgroundGap}
-          size={FLOW_CONFIG.backgroundSize}
-          color="#e5e7eb"
+          id="grid-1"
+          variant="dots"
+          gap={20}
+          size={1}
+          color="#e2e8f0"
         />
-        <Controls className="bg-white shadow-lg rounded-lg" />
+        <Background
+          id="grid-2"
+          variant="dots"
+          gap={100}
+          size={2}
+          color="#cbd5e1"
+        />
+        <Controls className="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200" />
         <MiniMap
           nodeColor="#3b82f6"
           maskColor="rgba(0, 0, 0, 0.1)"
           position="top-right"
-          className="bg-white shadow-lg rounded-lg"
+          className="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200"
         />
       </ReactFlow>
     </div>

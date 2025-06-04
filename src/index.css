@@ -2,10 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-/* React Flow custom styles using Tailwind approach */
+/* React Flow custom styles with rounded corners */
 @layer components {
   .react-flow__node {
-    @apply border-2 border-blue-500 rounded-lg bg-white shadow-lg transition-all duration-200;
+    @apply border-2 border-blue-500 rounded-xl bg-white shadow-lg transition-all duration-200;
+    backdrop-filter: blur(10px);
   }
 
   .react-flow__node.selected {
@@ -34,20 +35,18 @@
     @apply bg-blue-500 border-2 border-white w-3 h-3 rounded-full;
   }
 
-  .react-flow__handle-top {
-    @apply -top-1;
+  /* Custom grid background */
+  .react-flow__background {
+    @apply rounded-xl;
   }
 
-  .react-flow__handle-bottom {
-    @apply -bottom-1;
+  /* Enhanced controls and minimap */
+  .react-flow__controls {
+    @apply rounded-xl;
   }
 
-  .react-flow__handle-left {
-    @apply -left-1;
-  }
-
-  .react-flow__handle-right {
-    @apply -right-1;
+  .react-flow__minimap {
+    @apply rounded-xl;
   }
 }
 
@@ -61,7 +60,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* Custom scrollbar for sidebar */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  @apply bg-gray-100 rounded-full;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full hover:bg-gray-400;
 }
