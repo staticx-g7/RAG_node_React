@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useDnD } from '../../../contexts/DnDContext';
 
 const OverviewTab = () => (
@@ -141,39 +141,203 @@ const NodesTab = () => {
 
 const TabbedSidebar = () => {
   const [activeTab, setActiveTab] = useState('overview');
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(80);
+  const [isVisible, setIsVisible] = useState(true);
+  const sidebarRef = useRef(null);
+
+  // Dynamic header height detection
+  useEffect(() => {
+    const detectHeaderHeight = () => {
+      const header = document.querySelector('header');
+      if (header) {
+        const height = header.getBoundingClientRect().height;
+        setHeaderHeight(height);
+      }
+    };
+
+    // Initial detection
+    detectHeaderHeight();
+
+    // Re-detect on window resize
+    const handleResize = () => {
+      detectHeaderHeight();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    // Use ResizeObserver for more accurate header size changes
+    const header = document.querySelector('header');
+    let resizeObserver;
+
+    if (header && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        detectHeaderHeight();
+      });
+      resizeObserver.observe(header);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, []);
+
+  // Enhanced hover effects for interactive elements
+  const handleMouseEnter = (e) => {
+    e.target.style.transform = 'scale(1.02)';
+  };
+
+  const handleMouseLeave = (e) => {
+    e.target.style.transform = 'scale(1)';
+  };
 
   return (
-    <aside className="w-80 bg-white/95 backdrop-blur-sm border-r border-gray-200 shadow-xl rounded-r-2xl">
-      {/* Tab Headers */}
-      <div className="flex border-b border-gray-200 bg-gray-50/50 rounded-tr-2xl">
+    <>
+      {/* Floating Toggle Button when sidebar is hidden */}
+      {!isVisible && (
         <button
-          onClick={() => setActiveTab('overview')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-200 ${
-            activeTab === 'overview'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-white'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
+          onClick={() => setIsVisible(true)}
+          className="fixed left-4 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 hover:scale-110 transition-all duration-300 z-50 flex items-center justify-center"
+          style={{
+            top: `${headerHeight + 16}px`,
+            width: '48px',
+            height: '48px'
+          }}
+          title="Open sidebar"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
         >
-          📋 Overview
+          ☰
         </button>
-        <button
-          onClick={() => setActiveTab('nodes')}
-          className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-200 ${
-            activeTab === 'nodes'
-              ? 'text-blue-600 border-b-2 border-blue-600 bg-white'
-              : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
-        >
-          🧩 Nodes
-        </button>
-      </div>
+      )}
 
-            {/* Tab Content */}
-            <div className="h-full overflow-y-auto">
-              {activeTab === 'overview' ? <OverviewTab /> : <NodesTab />}
+      {/* Main Sidebar */}
+      <aside
+        ref={sidebarRef}
+        className={`fixed left-0 bg-white/95 backdrop-blur-sm border-r border-gray-200 shadow-2xl z-40 transition-all duration-300 ease-in-out rounded-tr-xl ${
+          isCollapsed ? 'w-12' : 'w-80'
+        } ${isVisible ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{
+          top: `${headerHeight}px`,
+          height: `calc(100vh - ${headerHeight}px)`
+        }}
+      >
+        {/* Control Buttons */}
+        <div className="absolute -right-3 top-4 flex flex-col space-y-2">
+          {/* Collapse/Expand Button */}
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 hover:scale-110 transition-all duration-200 z-10"
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? '→' : '←'}
+          </button>
+
+          {/* Hide Button */}
+          <button
+            onClick={() => setIsVisible(false)}
+            className="w-6 h-6 bg-gray-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-gray-700 hover:scale-110 transition-all duration-200 z-10"
+            title="Hide sidebar"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Sidebar Content */}
+        {!isCollapsed && (
+          <>
+            {/* Tab Headers with enhanced hover effects */}
+            <div className="flex border-b border-gray-200 bg-gray-50/50 rounded-tr-xl">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-200 hover:scale-105 ${
+                  activeTab === 'overview'
+                    ? 'text-blue-600 border-b-2 border-blue-600 bg-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+                }`}
+                onMouseEnter={(e) => {
+                  if (activeTab !== 'overview') {
+                    e.target.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                📋 Overview
+              </button>
+              <button
+                onClick={() => setActiveTab('nodes')}
+                className={`flex-1 px-4 py-3 text-sm font-medium transition-all duration-200 hover:scale-105 ${
+                  activeTab === 'nodes'
+                    ? 'text-blue-600 border-b-2 border-blue-600 bg-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+                }`}
+                onMouseEnter={(e) => {
+                  if (activeTab !== 'nodes') {
+                    e.target.style.transform = 'translateY(-2px)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                🧩 Nodes
+              </button>
             </div>
-          </aside>
-        );
-      };
 
-      export default TabbedSidebar;
+            {/* Tab Content with smooth transitions */}
+            <div className="h-full overflow-y-auto pb-16">
+              <div className={`transition-opacity duration-300 ${activeTab === 'overview' ? 'opacity-100' : 'opacity-0 hidden'}`}>
+                {activeTab === 'overview' && <OverviewTab />}
+              </div>
+              <div className={`transition-opacity duration-300 ${activeTab === 'nodes' ? 'opacity-100' : 'opacity-0 hidden'}`}>
+                {activeTab === 'nodes' && <NodesTab />}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Collapsed State with enhanced icons */}
+        {isCollapsed && (
+          <div className="flex flex-col items-center pt-4 space-y-4">
+            <button
+              onClick={() => {
+                setIsCollapsed(false);
+                setActiveTab('overview');
+              }}
+              className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center hover:bg-blue-200 hover:scale-110 transition-all duration-200"
+              title="Overview"
+            >
+              <span className="text-blue-600 text-sm">📋</span>
+            </button>
+            <button
+              onClick={() => {
+                setIsCollapsed(false);
+                setActiveTab('nodes');
+              }}
+              className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center hover:bg-gray-200 hover:scale-110 transition-all duration-200"
+              title="Nodes"
+            >
+              <span className="text-gray-600 text-sm">🧩</span>
+            </button>
+          </div>
+        )}
+      </aside>
+
+      {/* Backdrop overlay with smooth fade */}
+      {isVisible && !isCollapsed && (
+        <div
+          className="fixed inset-0 bg-black/10 z-30 transition-opacity duration-300"
+          onClick={() => setIsVisible(false)}
+          style={{ top: `${headerHeight}px` }}
+        />
+      )}
+    </>
+  );
+};
+
+export default TabbedSidebar;

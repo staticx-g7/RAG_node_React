@@ -188,7 +188,7 @@ const FlowboardComponent = () => {
     };
   }, [onDeleteEdge]);
 
-  return (
+ return (
     <div
       className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200"
       ref={reactFlowWrapper}
@@ -210,22 +210,30 @@ const FlowboardComponent = () => {
         fitViewOptions={FLOW_CONFIG.fitViewOptions}
         nodeOrigin={FLOW_CONFIG.nodeOrigin}
         className="rounded-xl"
+        // Enable snap to grid for better alignment
+        snapToGrid={true}
+        snapGrid={[20, 20]}
       >
-        {/* Multiple layered backgrounds for a sophisticated grid */}
+        {/* Line Grid Background */}
         <Background
-          id="grid-1"
-          variant="dots"
+          variant="lines"
           gap={20}
           size={1}
           color="#e2e8f0"
+          style={{
+            backgroundColor: '#fafafa',
+          }}
         />
+        {/* Secondary grid for major lines */}
         <Background
-          id="grid-2"
-          variant="dots"
+          id="major-grid"
+          variant="lines"
           gap={100}
           size={2}
           color="#cbd5e1"
+          offset={0}
         />
+
         <Controls className="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200" />
         <MiniMap
           nodeColor="#3b82f6"
