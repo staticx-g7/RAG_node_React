@@ -10,7 +10,7 @@ function App() {
   return (
     <DnDProvider>
       <motion.div
-        className="h-screen flex flex-col relative overflow-hidden"
+        className="h-screen flex flex-col"
         style={{
           background: 'linear-gradient(135deg, #f8f5f0 0%, #f0ebe3 50%, #e8ddd4 100%)'
         }}
@@ -19,13 +19,19 @@ function App() {
         transition={{ duration: 1.5 }}
       >
         <Header />
-        <TabbedSidebar />
-        {/* CRITICAL: Remove any wrapper divs that might block events */}
-        <main className="flex-1 relative z-10">
-          <div className="h-full p-4">
-            <Flowboard />
+        {/* Use flex container with consistent height for both sidebar and canvas */}
+        <div className="flex flex-1 gap-3 p-4 min-h-0">
+          {/* Sidebar container with flex height */}
+          <div className="relative flex flex-col" style={{ width: '320px' }}>
+            <TabbedSidebar />
           </div>
-        </main>
+          {/* Canvas with matching flex height */}
+          <main className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 min-h-0">
+              <Flowboard />
+            </div>
+          </main>
+        </div>
       </motion.div>
     </DnDProvider>
   );

@@ -240,6 +240,7 @@ const FlowboardComponent = () => {
       ref={reactFlowWrapper}
       onDrop={onDrop}
       onDragOver={onDragOver}
+      style={{ margin: 0 }} // Remove any default margins
     >
       <ReactFlow
         nodes={nodes}
