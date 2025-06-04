@@ -19,11 +19,13 @@ function App() {
         transition={{ duration: 1.5 }}
       >
         <Header />
-        {/* Use flex container with consistent height for both sidebar and canvas */}
+        {/* Fixed: Use flex with consistent height for both sidebar and canvas */}
         <div className="flex flex-1 gap-3 p-4 min-h-0">
-          {/* Sidebar container with flex height */}
+          {/* Sidebar container with exact height matching */}
           <div className="relative flex flex-col" style={{ width: '320px' }}>
-            <TabbedSidebar />
+            <div className="flex-1 min-h-0">
+              <TabbedSidebar />
+            </div>
           </div>
           {/* Canvas with matching flex height */}
           <main className="flex-1 flex flex-col min-h-0">
