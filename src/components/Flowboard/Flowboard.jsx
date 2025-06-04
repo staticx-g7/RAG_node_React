@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -15,7 +15,7 @@ import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import '@xyflow/react/dist/style.css';
 
-// Custom Edge Component with Delete Button
+// Custom Edge Component with Hover Delete Button
 const CustomEdge = ({
   id,
   sourceX,
@@ -26,6 +26,7 @@ const CustomEdge = ({
   targetPosition,
   style = {},
   markerEnd,
+  data,
 }) => {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -38,31 +39,50 @@ const CustomEdge = ({
 
   const onEdgeClick = (evt, id) => {
     evt.stopPropagation();
-    // This will be handled by the parent component
     window.dispatchEvent(new CustomEvent('deleteEdge', { detail: { id } }));
   };
 
+  const isHovered = data?.isHovered || false;
+
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      <BaseEdge
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          ...style,
+          strokeWidth: isHovered ? 3 : 2,
+          stroke: isHovered ? '#ef4444' : '#6b7280',
+        }}
+      />
       <EdgeLabelRenderer>
-        <div
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            fontSize: 12,
-            pointerEvents: 'all',
-          }}
-          className="nodrag nopan"
-        >
-          <button
-            className="bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-lg transition-colors duration-200"
-            onClick={(event) => onEdgeClick(event, id)}
-            title="Delete connection"
+        {isHovered && (
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              pointerEvents: 'all',
+            }}
+            className="nodrag nopan"
           >
-            ×
-          </button>
-        </div>
+            <div
+              className="bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 border border-white shadow-lg cursor-pointer transition-transform duration-150 hover:scale-110"
+              onClick={(event) => onEdgeClick(event, id)}
+              title="Delete connection"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                lineHeight: '1',
+                userSelect: 'none',
+              }}
+            >
+              ×
+            </div>
+          </div>
+        )}
       </EdgeLabelRenderer>
     </>
   );
@@ -90,6 +110,38 @@ const FlowboardComponent = () => {
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
 
+  // Handle edge mouse enter
+  // Handle edge mouse enter - instant response
+const onEdgeMouseEnter = useCallback((event, edge) => {
+  setEdges((edges) =>
+    edges.map((e) => {
+      if (e.id === edge.id) {
+        return {
+          ...e,
+          data: { ...e.data, isHovered: true },
+        };
+      }
+      return e;
+    })
+  );
+}, [setEdges]);
+
+  // Handle edge mouse leave - instant response
+  const onEdgeMouseLeave = useCallback((event, edge) => {
+    setEdges((edges) =>
+      edges.map((e) => {
+        if (e.id === edge.id) {
+          return {
+            ...e,
+            data: { ...e.data, isHovered: false },
+          };
+        }
+        return e;
+      })
+    );
+  }, [setEdges]);
+
+
   // Listen for delete edge events
   React.useEffect(() => {
     const handleDeleteEdge = (event) => {
@@ -102,7 +154,7 @@ const FlowboardComponent = () => {
     };
   }, [onDeleteEdge]);
 
-  // Handle node deletion (optional - delete key when node is selected)
+  // Handle node deletion
   const onNodesDelete = useCallback(
     (deleted) => {
       setEdges((edges) =>
@@ -147,6 +199,8 @@ const FlowboardComponent = () => {
         onConnect={onConnect}
         onConnectEnd={onConnectEnd}
         onPaneDoubleClick={onPaneDoubleClick}
+        onEdgeMouseEnter={onEdgeMouseEnter}
+        onEdgeMouseLeave={onEdgeMouseLeave}
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={FLOW_CONFIG.fitViewOptions}
