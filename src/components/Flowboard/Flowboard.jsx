@@ -10,12 +10,15 @@ import {
   getBezierPath,
   EdgeLabelRenderer,
   BaseEdge,
+  addEdge,
+  useReactFlow,
 } from '@xyflow/react';
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
+import { useDnD } from '../../contexts/DnDContext';
 import '@xyflow/react/dist/style.css';
 
-// Custom Edge Component with Hover Delete Button
+// Custom Edge Component (same as before)
 const CustomEdge = ({
   id,
   sourceX,
@@ -88,10 +91,12 @@ const CustomEdge = ({
   );
 };
 
-// Edge types configuration
 const edgeTypes = {
   custom: CustomEdge,
 };
+
+let nodeId = 4;
+const getId = () => `dndnode_${nodeId++}`;
 
 const FlowboardComponent = () => {
   const reactFlowWrapper = useRef(null);
@@ -99,10 +104,43 @@ const FlowboardComponent = () => {
   const [edges, setEdges, onEdgesChange] = useEdgesState(
     INITIAL_EDGES.map(edge => ({ ...edge, type: 'custom' }))
   );
+  const { screenToFlowPosition } = useReactFlow();
+  const [type] = useDnD();
 
   const { onConnect, onConnectEnd, onPaneDoubleClick } = useNodeOperations(
     setNodes,
     setEdges
+  );
+
+  // Drag and Drop handlers
+  const onDragOver = useCallback((event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+
+      if (!type) {
+        return;
+      }
+
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      const newNode = {
+        id: getId(),
+        type,
+        position,
+        data: { label: `${type} node` },
+      };
+
+      setNodes((nds) => nds.concat(newNode));
+    },
+    [screenToFlowPosition, type, setNodes]
   );
 
   // Handle edge deletion
@@ -110,23 +148,21 @@ const FlowboardComponent = () => {
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
 
-  // Handle edge mouse enter
-  // Handle edge mouse enter - instant response
-const onEdgeMouseEnter = useCallback((event, edge) => {
-  setEdges((edges) =>
-    edges.map((e) => {
-      if (e.id === edge.id) {
-        return {
-          ...e,
-          data: { ...e.data, isHovered: true },
-        };
-      }
-      return e;
-    })
-  );
-}, [setEdges]);
+  // Handle edge mouse events
+  const onEdgeMouseEnter = useCallback((event, edge) => {
+    setEdges((edges) =>
+      edges.map((e) => {
+        if (e.id === edge.id) {
+          return {
+            ...e,
+            data: { ...e.data, isHovered: true },
+          };
+        }
+        return e;
+      })
+    );
+  }, [setEdges]);
 
-  // Handle edge mouse leave - instant response
   const onEdgeMouseLeave = useCallback((event, edge) => {
     setEdges((edges) =>
       edges.map((e) => {
@@ -140,7 +176,6 @@ const onEdgeMouseEnter = useCallback((event, edge) => {
       })
     );
   }, [setEdges]);
-
 
   // Listen for delete edge events
   React.useEffect(() => {
@@ -189,7 +224,12 @@ const onEdgeMouseEnter = useCallback((event, edge) => {
   );
 
   return (
-    <div className="w-full h-full bg-gray-50" ref={reactFlowWrapper} onKeyDown={onKeyDown} tabIndex={0}>
+    <div
+      className="w-full h-full bg-gray-50"
+      ref={reactFlowWrapper}
+      onKeyDown={onKeyDown}
+      tabIndex={0}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -201,6 +241,8 @@ const onEdgeMouseEnter = useCallback((event, edge) => {
         onPaneDoubleClick={onPaneDoubleClick}
         onEdgeMouseEnter={onEdgeMouseEnter}
         onEdgeMouseLeave={onEdgeMouseLeave}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={FLOW_CONFIG.fitViewOptions}
