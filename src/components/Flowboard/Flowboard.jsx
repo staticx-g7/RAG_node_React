@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -20,7 +20,6 @@ import { useDnD } from '../../contexts/DnDContext';
 import ExecuteNode from '../nodes/ExecuteNode';
 import ConsoleWindow from '../ui/Console';
 import '@xyflow/react/dist/style.css';
-
 
 // Enhanced Custom Node Components with Execution State
 const CustomNode = ({ id, data, isConnectable, selected }) => {
@@ -263,9 +262,6 @@ const edgeTypes = {
   custom: CustomEdge,
 };
 
-let nodeId = 4;
-const getId = () => `dndnode_${nodeId++}`;
-
 const FlowboardComponent = () => {
   const reactFlowWrapper = useRef(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(INITIAL_NODES);
@@ -274,14 +270,24 @@ const FlowboardComponent = () => {
   );
   const { screenToFlowPosition } = useReactFlow();
   const [type] = useDnD();
+  const [nodeCounter, setNodeCounter] = useState(4);
 
   const { onConnect, onConnectEnd } = useNodeOperations(setNodes, setEdges);
+
+  // Generate truly unique ID using state and timestamp
+  const generateUniqueId = useCallback(() => {
+    const newCounter = nodeCounter + 1;
+    setNodeCounter(newCounter);
+    const uniqueId = `dndnode_${newCounter}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return uniqueId;
+  }, [nodeCounter]);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
+  // SINGLE onDrop function - no duplicates
   const onDrop = useCallback(
     (event) => {
       event.preventDefault();
@@ -298,31 +304,42 @@ const FlowboardComponent = () => {
         y: event.clientY,
       });
 
+      const newNodeId = generateUniqueId();
       const newNode = {
-        id: getId(),
+        id: newNodeId,
         type: droppedType,
         position,
         data: { label: `${droppedType} node` },
       };
 
-      setNodes((nds) => nds.concat(newNode));
+      // Simple creation log for your console monitoring preference[2]
+      console.log(`➕ Added new ${droppedType} node`);
+
+      setNodes((currentNodes) => {
+        const existingNode = currentNodes.find(node => node.id === newNodeId);
+        if (existingNode) {
+          return currentNodes;
+        }
+        return currentNodes.concat(newNode);
+      });
     },
-    [screenToFlowPosition, type, setNodes]
+    [screenToFlowPosition, type, generateUniqueId, setNodes]
   );
 
   // Handle node deletion
   const onDeleteNode = useCallback((nodeId) => {
+    console.log(`🗑️ Deleted node: ${nodeId}`);
     setNodes((nodes) => nodes.filter((node) => node.id !== nodeId));
-    // Also remove connected edges
     setEdges((edges) => edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId));
   }, [setNodes, setEdges]);
 
   // Handle edge deletion
   const onDeleteEdge = useCallback((edgeId) => {
+    console.log(`🗑️ Deleted edge: ${edgeId}`);
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
 
-  // Handle keyboard deletion with custom validation
+  // Handle keyboard deletion
   const onKeyDown = useCallback((event) => {
     if (event.key === 'Delete' || event.key === 'Backspace') {
       const selectedNodes = nodes.filter((node) => node.selected);
@@ -330,14 +347,16 @@ const FlowboardComponent = () => {
 
       if (selectedNodes.length > 0) {
         const selectedNodeIds = selectedNodes.map((node) => node.id);
+        console.log(`🗑️ Deleted ${selectedNodes.length} selected node(s)`);
+
         setNodes((nodes) => nodes.filter((node) => !node.selected));
-        // Remove edges connected to deleted nodes
         setEdges((edges) => edges.filter((edge) =>
           !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
         ));
       }
 
       if (selectedEdges.length > 0) {
+        console.log(`🗑️ Deleted ${selectedEdges.length} selected edge(s)`);
         setEdges((edges) => edges.filter((edge) => !edge.selected));
       }
     }
@@ -438,7 +457,6 @@ const FlowboardComponent = () => {
         />
       </ReactFlow>
 
-      {/* Console Window - Positioned within canvas only */}
       <ConsoleWindow containerRef={reactFlowWrapper} />
     </div>
   );
