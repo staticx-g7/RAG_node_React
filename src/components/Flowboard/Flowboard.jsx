@@ -17,20 +17,26 @@ import {
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import { useDnD } from '../../contexts/DnDContext';
+import ExecuteNode from '../nodes/ExecuteNode';
+import ConsoleWindow from '../ui/Console';
 import '@xyflow/react/dist/style.css';
 
-// Custom Node Components with Delete Icons
+
+// Enhanced Custom Node Components with Execution State
 const CustomNode = ({ id, data, isConnectable, selected }) => {
   const handleDelete = (e) => {
     e.stopPropagation();
     window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
   };
 
+  const isExecuting = data?.isExecuting || false;
+  const lastExecuted = data?.lastExecuted;
+
   return (
-    <div className={`relative px-4 py-2 shadow-md rounded-md bg-white border-2 transition-all duration-200 ${
+    <div className={`relative px-4 py-2 shadow-md rounded-md bg-white border-2 transition-all duration-200 group ${
       selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-stone-400'
-    }`}>
-      {/* Delete button - only show on hover or when selected */}
+    } ${isExecuting ? 'ring-4 ring-green-300 animate-pulse bg-green-50' : ''}`}>
+
       <button
         onClick={handleDelete}
         className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
@@ -40,6 +46,7 @@ const CustomNode = ({ id, data, isConnectable, selected }) => {
       >
         ×
       </button>
+
       <Handle
         type="target"
         position={Position.Top}
@@ -47,7 +54,21 @@ const CustomNode = ({ id, data, isConnectable, selected }) => {
         style={{ background: '#555' }}
         isConnectable={isConnectable}
       />
-      <div>{data.label}</div>
+
+      <div className="flex items-center space-x-2">
+        <div className={`w-2 h-2 rounded-full ${
+          isExecuting ? 'bg-green-400 animate-ping' :
+          lastExecuted ? 'bg-blue-400' : 'bg-gray-400'
+        }`}></div>
+        <div>{data.label}</div>
+      </div>
+
+      {lastExecuted && (
+        <div className="text-xs text-gray-500 mt-1">
+          Last: {new Date(lastExecuted).toLocaleTimeString()}
+        </div>
+      )}
+
       <Handle
         type="source"
         position={Position.Bottom}
@@ -65,10 +86,14 @@ const InputNode = ({ id, data, isConnectable, selected }) => {
     window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
   };
 
+  const isExecuting = data?.isExecuting || false;
+  const lastExecuted = data?.lastExecuted;
+
   return (
     <div className={`relative px-4 py-2 shadow-md rounded-md bg-green-50 border-2 transition-all duration-200 group ${
       selected ? 'border-green-600 ring-2 ring-green-200' : 'border-green-400'
-    }`}>
+    } ${isExecuting ? 'ring-4 ring-green-300 animate-pulse bg-green-100' : ''}`}>
+
       <button
         onClick={handleDelete}
         className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
@@ -78,7 +103,21 @@ const InputNode = ({ id, data, isConnectable, selected }) => {
       >
         ×
       </button>
-      <div>{data.label}</div>
+
+      <div className="flex items-center space-x-2">
+        <div className={`w-2 h-2 rounded-full ${
+          isExecuting ? 'bg-green-400 animate-ping' :
+          lastExecuted ? 'bg-blue-400' : 'bg-green-500'
+        }`}></div>
+        <div>{data.label}</div>
+      </div>
+
+      {lastExecuted && (
+        <div className="text-xs text-green-600 mt-1">
+          Last: {new Date(lastExecuted).toLocaleTimeString()}
+        </div>
+      )}
+
       <Handle
         type="source"
         position={Position.Bottom}
@@ -96,10 +135,14 @@ const OutputNode = ({ id, data, isConnectable, selected }) => {
     window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
   };
 
+  const isExecuting = data?.isExecuting || false;
+  const lastExecuted = data?.lastExecuted;
+
   return (
     <div className={`relative px-4 py-2 shadow-md rounded-md bg-red-50 border-2 transition-all duration-200 group ${
       selected ? 'border-red-600 ring-2 ring-red-200' : 'border-red-400'
-    }`}>
+    } ${isExecuting ? 'ring-4 ring-green-300 animate-pulse bg-green-50' : ''}`}>
+
       <button
         onClick={handleDelete}
         className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg ${
@@ -109,6 +152,7 @@ const OutputNode = ({ id, data, isConnectable, selected }) => {
       >
         ×
       </button>
+
       <Handle
         type="target"
         position={Position.Top}
@@ -116,13 +160,25 @@ const OutputNode = ({ id, data, isConnectable, selected }) => {
         style={{ background: '#ef4444' }}
         isConnectable={isConnectable}
       />
-      <div>{data.label}</div>
+
+      <div className="flex items-center space-x-2">
+        <div className={`w-2 h-2 rounded-full ${
+          isExecuting ? 'bg-green-400 animate-ping' :
+          lastExecuted ? 'bg-blue-400' : 'bg-red-500'
+        }`}></div>
+        <div>{data.label}</div>
+      </div>
+
+      {lastExecuted && (
+        <div className="text-xs text-red-600 mt-1">
+          Last: {new Date(lastExecuted).toLocaleTimeString()}
+        </div>
+      )}
     </div>
   );
 };
 
-// Custom Edge Component (same as before)
-// Update your Custom Edge Component to include proper arrow markers
+// Custom Edge Component
 const CustomEdge = ({
   id,
   sourceX,
@@ -153,28 +209,9 @@ const CustomEdge = ({
 
   return (
     <>
-      {/* Add custom arrow marker definition */}
-      <defs>
-        <marker
-          id={`arrow-${id}`}
-          markerWidth="12"
-          markerHeight="12"
-          refX="10"
-          refY="3"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          <path
-            d="M0,0 L0,6 L9,3 z"
-            fill={isHovered ? '#ef4444' : '#6b7280'}
-            stroke={isHovered ? '#ef4444' : '#6b7280'}
-          />
-        </marker>
-      </defs>
-
       <BaseEdge
         path={edgePath}
-        markerEnd={`url(#arrow-${id})`}
+        markerEnd={markerEnd}
         style={{
           ...style,
           strokeWidth: isHovered ? 3 : 2,
@@ -214,10 +251,12 @@ const CustomEdge = ({
   );
 };
 
+// Node types with ExecuteNode
 const nodeTypes = {
   input: InputNode,
   default: CustomNode,
   output: OutputNode,
+  execute: ExecuteNode,
 };
 
 const edgeTypes = {
@@ -283,7 +322,7 @@ const FlowboardComponent = () => {
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
 
-  // Handle keyboard deletion
+  // Handle keyboard deletion with custom validation
   const onKeyDown = useCallback((event) => {
     if (event.key === 'Delete' || event.key === 'Backspace') {
       const selectedNodes = nodes.filter((node) => node.selected);
@@ -347,7 +386,7 @@ const FlowboardComponent = () => {
 
   return (
     <div
-      className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200"
+      className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200 relative"
       ref={reactFlowWrapper}
       onDrop={onDrop}
       onDragOver={onDragOver}
@@ -372,7 +411,7 @@ const FlowboardComponent = () => {
         snapToGrid={true}
         snapGrid={[20, 20]}
         connectionMode="loose"
-        deleteKeyCode={['Delete', 'Backspace']}
+        deleteKeyCode={[]}
       >
         <Background
           variant="lines"
@@ -398,6 +437,9 @@ const FlowboardComponent = () => {
           className="bg-white/90 backdrop-blur-sm shadow-lg rounded-xl border border-gray-200"
         />
       </ReactFlow>
+
+      {/* Console Window - Positioned within canvas only */}
+      <ConsoleWindow containerRef={reactFlowWrapper} />
     </div>
   );
 };

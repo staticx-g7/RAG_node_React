@@ -69,28 +69,36 @@ const NodesTab = () => {
   };
 
   const nodeTypes = [
-    {
-      type: 'input',
-      label: 'Input Node',
-      icon: '📥',
-      color: 'bg-gradient-to-r from-green-100 to-emerald-100 border-green-300 text-green-800',
-      description: 'Start your workflow'
-    },
-    {
-      type: 'default',
-      label: 'Process Node',
-      icon: '⚙️',
-      color: 'bg-gradient-to-r from-blue-100 to-cyan-100 border-blue-300 text-blue-800',
-      description: 'Process data'
-    },
-    {
-      type: 'output',
-      label: 'Output Node',
-      icon: '📤',
-      color: 'bg-gradient-to-r from-red-100 to-rose-100 border-red-300 text-red-800',
-      description: 'End your workflow'
-    },
+  {
+    type: 'input',
+    label: 'Input Node',
+    icon: '📥',
+    color: 'bg-gradient-to-r from-green-100 to-emerald-100 border-green-300 text-green-800',
+    description: 'Start your workflow'
+  },
+  {
+    type: 'execute',
+    label: 'Execute Node',
+    icon: '▶️',
+    color: 'bg-gradient-to-r from-purple-100 to-violet-100 border-purple-300 text-purple-800',
+    description: 'Execute connected nodes'
+  },
+  {
+    type: 'default',
+    label: 'Process Node',
+    icon: '⚙️',
+    color: 'bg-gradient-to-r from-blue-100 to-cyan-100 border-blue-300 text-blue-800',
+    description: 'Process data'
+  },
+  {
+    type: 'output',
+    label: 'Output Node',
+    icon: '📤',
+    color: 'bg-gradient-to-r from-red-100 to-rose-100 border-red-300 text-red-800',
+    description: 'End your workflow'
+  },
   ];
+  
 
   return (
     <div className="p-4 space-y-4">
