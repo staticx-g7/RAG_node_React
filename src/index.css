@@ -93,3 +93,33 @@
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.8);
 }
+
+/* Enhanced handle styling */
+.react-flow__handle {
+  width: 8px !important;
+  height: 8px !important;
+  border: 2px solid white !important;
+  border-radius: 50% !important;
+}
+
+.react-flow__handle-top {
+  top: -4px !important;
+}
+
+.react-flow__handle-bottom {
+  bottom: -4px !important;
+}
+
+.react-flow__handle-left {
+  left: -4px !important;
+}
+
+.react-flow__handle-right {
+  right: -4px !important;
+}
+
+/* Node styling improvements */
+.react-flow__node {
+  font-family: 'Courier New', monospace;
+}
+

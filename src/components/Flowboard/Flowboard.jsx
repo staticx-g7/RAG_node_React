@@ -11,13 +11,62 @@ import {
   EdgeLabelRenderer,
   BaseEdge,
   useReactFlow,
+  Handle,
+  Position,
 } from '@xyflow/react';
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import { useDnD } from '../../contexts/DnDContext';
 import '@xyflow/react/dist/style.css';
 
-// Custom Edge Component (same as before)
+// Custom Node Components
+const CustomNode = ({ data, isConnectable }) => (
+  <div className="px-4 py-2 shadow-md rounded-md bg-white border-2 border-stone-400">
+    <Handle
+      type="target"
+      position={Position.Top}
+      id="top"
+      style={{ background: '#555' }}
+      isConnectable={isConnectable}
+    />
+    <div>{data.label}</div>
+    <Handle
+      type="source"
+      position={Position.Bottom}
+      id="bottom"
+      style={{ background: '#555' }}
+      isConnectable={isConnectable}
+    />
+  </div>
+);
+
+const InputNode = ({ data, isConnectable }) => (
+  <div className="px-4 py-2 shadow-md rounded-md bg-green-50 border-2 border-green-400">
+    <div>{data.label}</div>
+    <Handle
+      type="source"
+      position={Position.Bottom}
+      id="bottom"
+      style={{ background: '#22c55e' }}
+      isConnectable={isConnectable}
+    />
+  </div>
+);
+
+const OutputNode = ({ data, isConnectable }) => (
+  <div className="px-4 py-2 shadow-md rounded-md bg-red-50 border-2 border-red-400">
+    <Handle
+      type="target"
+      position={Position.Top}
+      id="top"
+      style={{ background: '#ef4444' }}
+      isConnectable={isConnectable}
+    />
+    <div>{data.label}</div>
+  </div>
+);
+
+// Custom Edge Component
 const CustomEdge = ({
   id,
   sourceX,
@@ -90,12 +139,37 @@ const CustomEdge = ({
   );
 };
 
+// Move outside component to prevent recreation
+const nodeTypes = {
+  input: InputNode,
+  default: CustomNode,
+  output: OutputNode,
+};
+
 const edgeTypes = {
   custom: CustomEdge,
 };
 
 let nodeId = 4;
 const getId = () => `dndnode_${nodeId++}`;
+
+const TestDropZone = ({ onTestDrop }) => (
+  <div
+    className="absolute top-20 left-4 w-32 h-32 bg-red-200 border-2 border-red-400 rounded-lg flex items-center justify-center text-xs z-50"
+    onDrop={(e) => {
+      e.preventDefault();
+      const data = e.dataTransfer.getData('application/reactflow');
+      console.log('🧪 TEST DROP ZONE - Received:', data);
+      onTestDrop(data);
+    }}
+    onDragOver={(e) => {
+      e.preventDefault();
+      console.log('🧪 TEST DROP ZONE - Drag over');
+    }}
+  >
+    Test Drop Zone
+  </div>
+);
 
 const FlowboardComponent = () => {
   const reactFlowWrapper = useRef(null);
@@ -105,57 +179,111 @@ const FlowboardComponent = () => {
   );
   const { screenToFlowPosition } = useReactFlow();
   const [type] = useDnD();
+  const [debugInfo, setDebugInfo] = useState('');
 
-  const { onConnect, onConnectEnd, onPaneDoubleClick } = useNodeOperations(
-    setNodes,
-    setEdges
-  );
+  const { onConnect, onConnectEnd } = useNodeOperations(setNodes, setEdges);
 
-  // Drag and Drop handlers
   const onDragOver = useCallback((event) => {
+    console.log('🎯 DRAG OVER - Event:', event);
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+    setDebugInfo(`Drag Over - Effect: ${event.dataTransfer.dropEffect}`);
+    console.log('✅ DRAG OVER - preventDefault called, dropEffect set to move');
   }, []);
 
   const onDrop = useCallback(
     (event) => {
+      console.log('🎯 DROP EVENT TRIGGERED!');
       event.preventDefault();
+      event.stopPropagation();
 
-      if (!type) {
+      const dataTransferTypes = Array.from(event.dataTransfer.types);
+      console.log('🎯 DROP - Available data types:', dataTransferTypes);
+
+      let droppedType = null;
+
+      try {
+        droppedType = event.dataTransfer.getData('application/reactflow');
+        console.log('🎯 DROP - Type from application/reactflow:', droppedType);
+      } catch (e) {
+        console.warn('⚠️ DROP - Could not get application/reactflow data:', e);
+      }
+
+      if (!droppedType) {
+        try {
+          droppedType = event.dataTransfer.getData('text/plain');
+          console.log('🎯 DROP - Type from text/plain:', droppedType);
+        } catch (e) {
+          console.warn('⚠️ DROP - Could not get text/plain data:', e);
+        }
+      }
+
+      if (!droppedType) {
+        droppedType = type;
+        console.log('🎯 DROP - Using context type:', droppedType);
+      }
+
+      if (!droppedType) {
+        console.error('❌ DROP - No node type available!');
+        setDebugInfo('❌ Drop failed: No node type available');
         return;
       }
 
-      const position = screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+      let position;
+      try {
+        position = screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        console.log('🎯 DROP - Calculated position:', position);
+      } catch (e) {
+        console.error('❌ DROP - Position calculation failed:', e);
+        setDebugInfo('❌ Drop failed: Position calculation error');
+        return;
+      }
 
       const newNode = {
         id: getId(),
-        type,
+        type: droppedType,
         position,
-        data: { label: `${type} node` },
+        data: { label: `${droppedType} node` },
       };
 
-      setNodes((nds) => nds.concat(newNode));
+      console.log('🎯 DROP - Creating new node:', newNode);
+
+      try {
+        setNodes((nds) => {
+          const updatedNodes = nds.concat(newNode);
+          console.log('✅ DROP - Nodes updated:', updatedNodes);
+          return updatedNodes;
+        });
+        setDebugInfo(`✅ Node created: ${droppedType} at ${position.x}, ${position.y}`);
+      } catch (e) {
+        console.error('❌ DROP - Failed to add node:', e);
+        setDebugInfo('❌ Drop failed: Could not add node');
+      }
     },
     [screenToFlowPosition, type, setNodes]
   );
 
-  // Handle edge deletion
+  const onDragEnter = useCallback((event) => {
+    console.log('🎯 DRAG ENTER - Event:', event);
+    event.preventDefault();
+  }, []);
+
+  const onDragLeave = useCallback((event) => {
+    console.log('🎯 DRAG LEAVE - Event:', event);
+  }, []);
+
   const onDeleteEdge = useCallback((edgeId) => {
     setEdges((edges) => edges.filter((edge) => edge.id !== edgeId));
   }, [setEdges]);
 
-  // Handle edge mouse events
   const onEdgeMouseEnter = useCallback((event, edge) => {
     setEdges((edges) =>
       edges.map((e) => {
         if (e.id === edge.id) {
-          return {
-            ...e,
-            data: { ...e.data, isHovered: true },
-          };
+          return { ...e, data: { ...e.data, isHovered: true } };
         }
         return e;
       })
@@ -166,17 +294,17 @@ const FlowboardComponent = () => {
     setEdges((edges) =>
       edges.map((e) => {
         if (e.id === edge.id) {
-          return {
-            ...e,
-            data: { ...e.data, isHovered: false },
-          };
+          return { ...e, data: { ...e.data, isHovered: false } };
         }
         return e;
       })
     );
   }, [setEdges]);
 
-  // Listen for delete edge events
+  const handleTestDrop = useCallback((data) => {
+    alert(`Test drop successful: ${data}`);
+  }, []);
+
   React.useEffect(() => {
     const handleDeleteEdge = (event) => {
       onDeleteEdge(event.detail.id);
@@ -188,11 +316,26 @@ const FlowboardComponent = () => {
     };
   }, [onDeleteEdge]);
 
- return (
+  return (
     <div
-      className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200"
+      className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200 relative"
       ref={reactFlowWrapper}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      style={{
+        pointerEvents: 'all'
+      }}
     >
+      <div className="absolute top-4 left-4 bg-yellow-100 border border-yellow-300 rounded p-2 text-xs z-50 max-w-xs pointer-events-none">
+        <strong>Debug Info:</strong><br />
+        Context Type: {type || 'null'}<br />
+        {debugInfo}
+      </div>
+
+      <TestDropZone onTestDrop={handleTestDrop} />
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -200,31 +343,28 @@ const FlowboardComponent = () => {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectEnd={onConnectEnd}
-        onPaneDoubleClick={onPaneDoubleClick}
         onEdgeMouseEnter={onEdgeMouseEnter}
         onEdgeMouseLeave={onEdgeMouseLeave}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
+        nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
         fitViewOptions={FLOW_CONFIG.fitViewOptions}
-        nodeOrigin={FLOW_CONFIG.nodeOrigin}
+        nodeOrigin={[0.5, 0.5]}
         className="rounded-xl"
-        // Enable snap to grid for better alignment
         snapToGrid={true}
         snapGrid={[20, 20]}
+        connectionMode="loose"
+        style={{
+          pointerEvents: 'all'
+        }}
       >
-        {/* Line Grid Background */}
         <Background
           variant="lines"
           gap={20}
           size={1}
           color="#e2e8f0"
-          style={{
-            backgroundColor: '#fafafa',
-          }}
+          style={{ backgroundColor: '#fafafa' }}
         />
-        {/* Secondary grid for major lines */}
         <Background
           id="major-grid"
           variant="lines"
