@@ -17,7 +17,7 @@ import {
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import { useDnD } from '../../contexts/DnDContext';
-import { ExecuteNode, TextNode, GitNode } from '../nodes'; // Using the new export structure
+import { ExecuteNode, TextNode, GitNode, FilterNode } from '../nodes'; // Using the new export structure
 import ConsoleWindow from '../ui/Console';
 import '@xyflow/react/dist/style.css';
 
@@ -258,6 +258,7 @@ const nodeTypes = {
   execute: ExecuteNode,
   text: TextNode,
   git: GitNode,
+  filter: FilterNode,
 };
 
 const edgeTypes = {

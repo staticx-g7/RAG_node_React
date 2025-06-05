@@ -131,6 +131,13 @@ const NodesTab = () => {
   description: 'Fetch repository contents'
   },
   {
+  type: 'filter',
+  label: 'Filter Node',
+  icon: '🔍',
+  color: 'bg-gradient-to-r from-purple-100 to-violet-100 border-purple-300 text-purple-800',
+  description: 'Filter repository contents'
+  },
+  {
     type: 'default',
     label: 'Process Node',
     icon: '⚙️',
