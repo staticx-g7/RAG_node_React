@@ -124,6 +124,13 @@ const NodesTab = () => {
     description: 'Execute connected nodes'
   },
   {
+  type: 'git',
+  label: 'Git Node',
+  icon: '🐙',
+  color: 'bg-gradient-to-r from-gray-100 to-slate-100 border-gray-300 text-gray-800',
+  description: 'Fetch repository contents'
+  },
+  {
     type: 'default',
     label: 'Process Node',
     icon: '⚙️',
