@@ -21,6 +21,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
   const { setNodes } = useReactFlow();
   const nodeRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const fetchButtonRef = useRef(null); // Add ref for the fetch button
 
   // Framer Motion values - simplified to prevent conflicts
   const scale = useMotionValue(1);
@@ -46,7 +47,6 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
 
   const handleDelete = useCallback((e) => {
     e.stopPropagation();
-    // Cancel any ongoing requests
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -138,132 +138,237 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
   }, [customEndpoint, platform]);
 
   const fetchRepoContents = useCallback(async () => {
-    if (!apiKey || !repoUrl || isLoading) return;
+  if (!apiKey || !repoUrl || isLoading) {
+    console.log(`⚠️ GitNode ${id}: Cannot fetch - missing data or already loading`);
+    return;
+  }
 
-    const parsedRepo = parseRepoUrl(repoUrl);
-    if (!parsedRepo) {
-      setError('Invalid repository URL format');
-      return;
-    }
+  const parsedRepo = parseRepoUrl(repoUrl);
+  if (!parsedRepo) {
+    setError('Invalid repository URL format');
+    return;
+  }
 
-    const endpoint = getApiEndpoint();
-    if (!endpoint) {
-      setError('API endpoint not configured');
-      return;
-    }
+  const endpoint = getApiEndpoint();
+  if (!endpoint) {
+    setError('API endpoint not configured');
+    return;
+  }
 
-    // Cancel any previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  // Cancel any previous request
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
 
-    // Create new abort controller
-    abortControllerRef.current = new AbortController();
+  // Create new abort controller
+  abortControllerRef.current = new AbortController();
 
-    setIsLoading(true);
-    setError(null);
+  setIsLoading(true);
+  setError(null);
 
-    try {
-      let allContents = [];
-      if (platform === 'github') {
-        const fetchedPaths = new Set();
-        const fetchDirectory = async (dirPath = '') => {
-          if (fetchedPaths.has(dirPath)) return;
-          fetchedPaths.add(dirPath);
-          const pathParam = dirPath ? `/${dirPath}` : '';
-          const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}`;
-          const headers = {
-            'Authorization': `token ${apiKey}`,
-            'Accept': 'application/vnd.github.v3+json'
-          };
-          const response = await fetch(apiUrl, {
-            headers,
-            signal: abortControllerRef.current.signal
-          });
-          if (!response.ok) {
-            throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
-          }
-          const data = await response.json();
-          for (const item of data) {
-            const formattedItem = {
-              name: item.name,
-              type: item.type === 'dir' ? 'folder' : 'file',
-              path: item.path,
-              size: item.size || 0,
-              url: item.download_url || item.html_url,
-              depth: (item.path.match(/\//g) || []).length
-            };
-            allContents.push(formattedItem);
-            if (item.type === 'dir') {
-              await fetchDirectory(item.path);
-            }
-          }
-        };
-        await fetchDirectory();
-      } else {
-        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000`;
+  try {
+    console.log(`🔍 GitNode ${id}: Starting repository fetch for ${repoUrl}`);
+
+    let allContents = [];
+    if (platform === 'github') {
+      const fetchedPaths = new Set();
+      const fetchDirectory = async (dirPath = '') => {
+        if (fetchedPaths.has(dirPath)) return;
+        fetchedPaths.add(dirPath);
+        const pathParam = dirPath ? `/${dirPath}` : '';
+        const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}`;
         const headers = {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          'Authorization': `token ${apiKey}`,
+          'Accept': 'application/vnd.github.v3+json'
         };
+
+        console.log(`📡 GitNode ${id}: Fetching ${apiUrl}`);
+
+        // **FIX: Check if abortController still exists before using signal**
         const response = await fetch(apiUrl, {
           headers,
-          signal: abortControllerRef.current.signal
+          signal: abortControllerRef.current?.signal // Use optional chaining
         });
-        if (!response.ok) {
-          throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        allContents = data.map(item => ({
-          name: item.name,
-          type: item.type === 'tree' ? 'folder' : 'file',
-          path: item.path,
-          size: 0,
-          url: item.web_url,
-          depth: (item.path.match(/\//g) || []).length
-        }));
-      }
 
-      const result = {
-        owner: parsedRepo.owner,
-        repo: parsedRepo.repo,
-        platform,
-        endpoint,
-        contents: allContents,
-        fetchedAt: new Date().toISOString(),
-        totalFiles: allContents.filter(item => item.type === 'file').length,
-        totalFolders: allContents.filter(item => item.type === 'folder').length
+        if (!response.ok) {
+          throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        for (const item of data) {
+          const formattedItem = {
+            name: item.name,
+            type: item.type === 'dir' ? 'folder' : 'file',
+            path: item.path,
+            size: item.size || 0,
+            url: item.download_url || item.html_url,
+            depth: (item.path.match(/\//g) || []).length
+          };
+          allContents.push(formattedItem);
+          if (item.type === 'dir') {
+            await fetchDirectory(item.path);
+          }
+        }
+      };
+      await fetchDirectory();
+    } else {
+      const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000`;
+      const headers = {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
       };
 
-      setRepoData(result);
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setError(err.message);
-      }
-    } finally {
-      // Remove artificial delay - this was causing the issues
-      setIsLoading(false);
-      abortControllerRef.current = null;
-    }
-  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isLoading]);
+      console.log(`📡 GitNode ${id}: Fetching ${apiUrl}`);
 
+      // **FIX: Check if abortController still exists before using signal**
+      const response = await fetch(apiUrl, {
+        headers,
+        signal: abortControllerRef.current?.signal // Use optional chaining
+      });
+
+      if (!response.ok) {
+        throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      allContents = data.map(item => ({
+        name: item.name,
+        type: item.type === 'tree' ? 'folder' : 'file',
+        path: item.path,
+        size: 0,
+        url: item.web_url,
+        depth: (item.path.match(/\//g) || []).length
+      }));
+    }
+
+    const result = {
+      owner: parsedRepo.owner,
+      repo: parsedRepo.repo,
+      platform,
+      endpoint,
+      contents: allContents,
+      fetchedAt: new Date().toISOString(),
+      totalFiles: allContents.filter(item => item.type === 'file').length,
+      totalFolders: allContents.filter(item => item.type === 'folder').length
+    };
+
+    console.log(`✅ GitNode ${id}: Successfully fetched ${allContents.length} items`);
+    setRepoData(result);
+
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error(`❌ GitNode ${id}: Fetch failed:`, err);
+      setError(err.message);
+    }
+  } finally {
+    setIsLoading(false);
+    abortControllerRef.current = null;
+  }
+}, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isLoading, id]);
+  
   const handleNodeExecution = useCallback(async (inputData) => {
+    console.log(`🎯 GitNode ${id}: Starting execution with input data:`, inputData);
+
     let apiKeyToUse = apiKey;
     let repoUrlToUse = repoUrl;
+    let hasUpdatedData = false;
+
+    // Process input data from connected nodes
     Object.values(inputData).forEach(data => {
-      if (data.value && data.inputType === 'api-key') {
-        apiKeyToUse = data.value;
-        setApiKey(data.value);
-      }
-      if (data.value && data.inputType === 'url') {
-        repoUrlToUse = data.value;
-        setRepoUrl(data.value);
+      if (data && data.value) {
+        if (data.inputType === 'api-key' || data.label?.toLowerCase().includes('api')) {
+          console.log(`🔑 GitNode ${id}: Using API key from connected node`);
+          apiKeyToUse = data.value;
+          setApiKey(data.value);
+          hasUpdatedData = true;
+        }
+        if (data.inputType === 'url' || data.label?.toLowerCase().includes('url')) {
+          console.log(`🔗 GitNode ${id}: Using repository URL from connected node`);
+          repoUrlToUse = data.value;
+          setRepoUrl(data.value);
+          hasUpdatedData = true;
+        }
       }
     });
-    if (apiKeyToUse && repoUrlToUse) {
-      await fetchRepoContents();
+
+    // Clear any previous errors
+    setError(null);
+
+    // Validate required data
+    if (!apiKeyToUse || !repoUrlToUse) {
+      const missingItems = [];
+      if (!apiKeyToUse) missingItems.push('API key');
+      if (!repoUrlToUse) missingItems.push('repository URL');
+
+      const errorMsg = `Missing required data: ${missingItems.join(' and ')}`;
+      console.log(`❌ GitNode ${id}: ${errorMsg}`);
+      setError(errorMsg);
+      return;
     }
-  }, [apiKey, repoUrl, fetchRepoContents]);
+
+    console.log(`✅ GitNode ${id}: All required data present, fetching repository...`);
+
+    // Wait a moment if we updated data to let the UI update
+    if (hasUpdatedData) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    // Fetch the repository data
+    try {
+      await fetchRepoContents();
+      console.log(`🎉 GitNode ${id}: Repository fetch completed successfully`);
+    } catch (error) {
+      console.error(`❌ GitNode ${id}: Repository fetch failed:`, error);
+      setError(`Failed to fetch repository: ${error.message}`);
+    }
+  }, [id, apiKey, repoUrl, fetchRepoContents]);
+
+  // **FIXED AUTO-EXECUTION EVENT LISTENER WITH PROPER DEPENDENCIES**
+  useEffect(() => {
+    const handleAutoExecution = (event) => {
+      if (event.detail.nodeId === id) {
+        console.log(`🎯 GitNode ${id}: Auto-triggered for execution`);
+
+        // Method 1: Try direct button click first
+        if (fetchButtonRef.current && !isLoading && apiKey && repoUrl) {
+          console.log(`✅ GitNode ${id}: Triggering fetch button click`);
+          fetchButtonRef.current.click();
+          return;
+        }
+
+        // Method 2: Direct function call if button click fails
+        if (apiKey && repoUrl && !isLoading) {
+          console.log(`✅ GitNode ${id}: Direct function call for auto-execution`);
+          fetchRepoContents();
+        } else {
+          console.log(`⚠️ GitNode ${id}: Cannot auto-execute - missing required data or loading`);
+          console.log(`   - API Key: ${apiKey ? 'Present' : 'Missing'}`);
+          console.log(`   - Repo URL: ${repoUrl ? 'Present' : 'Missing'}`);
+          console.log(`   - Is Loading: ${isLoading}`);
+          console.log(`   - Button Ref: ${fetchButtonRef.current ? 'Present' : 'Missing'}`);
+
+          // Show error in UI
+          const missing = [];
+          if (!apiKey) missing.push('API key');
+          if (!repoUrl) missing.push('repository URL');
+          if (isLoading) missing.push('node is busy');
+
+          setError(`Cannot auto-execute - ${missing.join(', ')}`);
+        }
+      }
+    };
+
+    // Listen for multiple event types to ensure compatibility
+    window.addEventListener('triggerExecution', handleAutoExecution);
+    window.addEventListener('triggerPlayButton', handleAutoExecution);
+    window.addEventListener('autoExecute', handleAutoExecution);
+
+    return () => {
+      window.removeEventListener('triggerExecution', handleAutoExecution);
+      window.removeEventListener('triggerPlayButton', handleAutoExecution);
+      window.removeEventListener('autoExecute', handleAutoExecution);
+    };
+  }, [id, apiKey, repoUrl, isLoading, fetchRepoContents]); // FIXED: Added fetchRepoContents to dependencies
 
   // Cleanup on unmount
   useEffect(() => {
@@ -504,7 +609,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
         }
       }}
     >
-      {/* Simplified loading glow - no blinking */}
+      {/* Simplified loading glow */}
       <AnimatePresence>
         {isLoading && (
           <motion.div
@@ -707,6 +812,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
         </motion.div>
 
         <motion.button
+          ref={fetchButtonRef} // CRITICAL: Add the ref here for auto-execution
           onClick={fetchRepoContents}
           disabled={isLoading || !apiKey || !repoUrl}
           className={`w-full py-2 px-4 rounded-lg font-medium text-sm mb-3 transition-all duration-200 ${

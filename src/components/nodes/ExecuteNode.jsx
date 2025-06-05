@@ -1,337 +1,190 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useCallback } from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../ui/PlayButton';
+import { motion, AnimatePresence } from 'framer-motion';
 
-const ExecuteNode = ({ id, data, isConnectable, selected }) => {
+const ExecuteNode = ({ id, data, isConnectable }) => {
   const [isExecuting, setIsExecuting] = useState(false);
-  const { getEdges, getNodes, setNodes } = useReactFlow();
+  const [executionResult, setExecutionResult] = useState(null);
+  const [error, setError] = useState(null);
 
-  const handleDelete = (e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  };
+  const { getNodes, getEdges } = useReactFlow();
 
-  // Main execution handler for PlayButton integration
-  const handleNodeExecution = async (inputData) => {
-    console.log(`🎯 ExecuteNode ${id}: Starting execution with input data:`, inputData);
-
-    setIsExecuting(true);
-
-    try {
-      const edges = getEdges();
-      const nodes = getNodes();
-
-      // Find all nodes connected to this ExecuteNode
-      const outgoingEdges = edges.filter(edge => edge.source === id);
-
-      if (outgoingEdges.length === 0) {
-        console.log(`⚠️ ExecuteNode ${id}: No nodes connected to execution node`);
-        return;
-      }
-
-      console.log(`▶️ ExecuteNode ${id}: Will trigger ${outgoingEdges.length} connected node(s)`);
-
-      // Process any input data from connected nodes
-      if (Object.keys(inputData).length > 0) {
-        console.log(`📊 ExecuteNode ${id}: Processing ${Object.keys(inputData).length} input connection(s)`);
-
-        // Update connected nodes with execution state
-        outgoingEdges.forEach(edge => {
-          const targetNode = nodes.find(node => node.id === edge.target);
-          if (targetNode) {
-            setNodes((nodes) =>
-              nodes.map((node) => {
-                if (node.id === targetNode.id) {
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      isExecuting: true,
-                      lastExecutedBy: id,
-                      executionTime: new Date().toISOString()
-                    }
-                  };
-                }
-                return node;
-              })
-            );
-          }
-        });
-      }
-
-      // Simulate execution processing time
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      console.log(`🚀 ExecuteNode ${id}: Execution completed, chain will continue automatically`);
-
-    } catch (error) {
-      console.error(`❌ ExecuteNode ${id}: Execution failed:`, error.message);
-    } finally {
-      setIsExecuting(false);
-    }
-  };
-
-  // Legacy execution function for backward compatibility
-  const executeConnectedNodes = async () => {
+  const triggerNextNodes = useCallback(async (currentNodeId) => {
     const edges = getEdges();
     const nodes = getNodes();
 
-    const outgoingEdges = edges.filter(edge => edge.source === id);
+    // Find all outgoing edges from current node
+    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
 
-    if (outgoingEdges.length === 0) {
-      console.log(`⚠️ No nodes connected to execution node ${data.label || id}`);
-      return;
-    }
+    if (outgoingEdges.length > 0) {
+      console.log(`🔗 ExecuteNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
 
-    console.log(`▶️ Executing ${outgoingEdges.length} connected node(s) from ${data.label || 'Execute Node'}`);
+      // Trigger each connected node
+      for (let i = 0; i < outgoingEdges.length; i++) {
+        const edge = outgoingEdges[i];
+        const targetNode = nodes.find(node => node.id === edge.target);
 
-    for (const edge of outgoingEdges) {
-      const targetNode = nodes.find(node => node.id === edge.target);
-      if (targetNode) {
-        console.log(`✅ Processing: ${targetNode.data.label}`);
+        if (targetNode) {
+          console.log(`🎯 ExecuteNode: Triggering ${targetNode.type} node ${edge.target}`);
 
-        setNodes((nodes) =>
-          nodes.map((node) => {
-            if (node.id === targetNode.id) {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  isExecuting: true,
-                  lastExecutedBy: id,
-                  executionTime: new Date().toISOString()
-                }
-              };
-            }
-            return node;
-          })
-        );
+          setTimeout(() => {
+            // Dispatch multiple event types to ensure compatibility
+            window.dispatchEvent(new CustomEvent('triggerExecution', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
 
-        console.log(`🎉 Completed: ${targetNode.data.label}`);
-
-        setNodes((nodes) =>
-          nodes.map((node) => {
-            if (node.id === targetNode.id) {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  isExecuting: false,
-                  lastExecuted: new Date().toISOString()
-                }
-              };
-            }
-            return node;
-          })
-        );
-
-        // Trigger cascading execution
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('executionComplete', {
-            detail: { nodeId: targetNode.id }
-          }));
-        }, 100);
+            window.dispatchEvent(new CustomEvent('autoExecute', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
+          }, i * 500);
+        }
       }
+    } else {
+      console.log(`⏹️ ExecuteNode: No connected nodes found after execution`);
     }
+  }, [getEdges, getNodes]);
 
-    console.log(`🚀 Execution flow completed successfully!`);
-  };
+  const handleExecution = useCallback(async () => {
+    if (isExecuting) return;
 
-  // Handle manual execute button click (legacy)
-  const handleExecute = async (e) => {
-    e.stopPropagation();
     setIsExecuting(true);
-
-    console.log(`🔥 Execute button clicked on ${data.label || 'Execute Node'}`);
+    setError(null);
+    setExecutionResult(null);
 
     try {
-      await executeConnectedNodes();
+      console.log(`▶️ ExecuteNode ${id}: Starting execution`);
+
+      // Simulate execution process
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const result = {
+        status: 'success',
+        message: 'Execution completed successfully',
+        timestamp: new Date().toISOString()
+      };
+
+      setExecutionResult(result);
+      console.log(`✅ ExecuteNode ${id}: Execution completed successfully`);
+
+      // Wait a moment before triggering next nodes
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Trigger next nodes in the chain
+      await triggerNextNodes(id);
+
     } catch (error) {
-      console.error(`❌ Execution failed: ${error.message}`);
+      console.error(`❌ ExecuteNode ${id}: Execution failed:`, error);
+      setError(error.message);
+    } finally {
+      setIsExecuting(false);
     }
-
-    setIsExecuting(false);
-  };
-
-  // Listen for auto-execution triggers from other nodes
-  useEffect(() => {
-    const handleTriggerExecution = (event) => {
-      if (event.detail.nodeId === id) {
-        console.log(`🎯 Auto-triggering execution for ExecuteNode: ${id}`);
-        handleNodeExecution({});
-      }
-    };
-
-    window.addEventListener('triggerExecution', handleTriggerExecution);
-
-    return () => {
-      window.removeEventListener('triggerExecution', handleTriggerExecution);
-    };
-  }, [id]);
+  }, [id, isExecuting, triggerNextNodes]);
 
   return (
     <motion.div
-      className={`relative w-32 h-20 border-2 rounded-xl shadow-lg transition-all duration-200 group ${
-        selected ? 'border-purple-600 ring-2 ring-purple-200' : 'border-purple-400'
-      }`}
-      animate={{
-        background: isExecuting
-          ? 'linear-gradient(135deg, #fecaca 0%, #ef4444 50%, #dc2626 100%)' // Red gradient when executing
-          : 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 50%, #86efac 100%)'  // Green gradient when idle
-      }}
-      transition={{
-        duration: 0.6,
-        ease: "easeInOut"
-      }}
-      style={{
-        scale: isExecuting ? [1, 1.05, 1] : 1,
-      }}
+      className="relative bg-gradient-to-br from-green-100 to-green-200 border-2 border-green-300 rounded-xl shadow-lg"
+      style={{ width: '200px', minHeight: '120px' }}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
     >
-      {/* Corner Play Button */}
-      <PlayButton
-        nodeId={id}
-        nodeType="execute"
-        onExecute={handleNodeExecution}
-        disabled={isExecuting}
-      />
-
-      {/* Delete button - positioned in opposite corner */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 shadow-lg z-10 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}
-        title="Delete node"
-        whileHover={{ scale: 1.2, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
-        transition={{ type: "spring", stiffness: 500 }}
-      >
-        ×
-      </motion.button>
-
-      {/* HANDLES - One per side for clean connectivity */}
-      {/* Top Handle - Input (Blue) */}
+      {/* Input Handle */}
       <Handle
         type="target"
         position={Position.Top}
-        id="top"
-        isConnectable={isConnectable}
+        id="input"
         style={{
-          background: '#3b82f6',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          zIndex: 10
+          background: '#6b7280',
+          width: '10px',
+          height: '10px',
+          border: '2px solid white'
         }}
+        isConnectable={isConnectable}
       />
 
-      {/* Right Handle - Output (Green) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="right"
-        isConnectable={isConnectable}
-        style={{
-          background: '#10b981',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          zIndex: 10
-        }}
-      />
+      <div className="p-4">
+        <div className="flex items-center space-x-2 mb-3">
+          <span className="text-xl">⚡</span>
+          <h3 className="text-sm font-semibold text-gray-800">Execute</h3>
+        </div>
 
-      {/* Bottom Handle - Output (Green) */}
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bottom"
-        isConnectable={isConnectable}
-        style={{
-          background: '#10b981',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          zIndex: 10
-        }}
-      />
-
-      {/* Left Handle - Input (Blue) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="left"
-        isConnectable={isConnectable}
-        style={{
-          background: '#3b82f6',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          zIndex: 10
-        }}
-      />
-
-      {/* Centered Execute Button Content */}
-      <div className="absolute inset-0 flex items-center justify-center p-2" style={{ zIndex: 1 }}>
+        {/* Main Execute Button */}
         <motion.button
-          onClick={handleExecute}
+          onClick={handleExecution}
           disabled={isExecuting}
-          className={`w-full h-full rounded-lg font-medium text-sm transition-all duration-200 flex items-center justify-center ${
+          className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-all duration-200 ${
             isExecuting
-              ? 'bg-white/90 text-red-700 cursor-not-allowed border border-red-300'
-              : 'bg-white/90 hover:bg-white text-green-700 hover:scale-105 active:scale-95 shadow-md border border-green-300'
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-lg hover:shadow-xl'
           }`}
           whileHover={!isExecuting ? { scale: 1.05 } : {}}
           whileTap={!isExecuting ? { scale: 0.95 } : {}}
-          animate={{
-            boxShadow: isExecuting
-              ? '0 0 20px rgba(239, 68, 68, 0.5)'
-              : '0 4px 12px rgba(0, 0, 0, 0.1)'
-          }}
         >
-          {isExecuting ? (
-            <motion.div
-              className="flex items-center justify-center space-x-1"
-              animate={{ opacity: [1, 0.7, 1] }}
-              transition={{ duration: 1, repeat: Infinity }}
-            >
-              <motion.div
-                className="w-3 h-3 border-2 border-red-600 border-t-transparent rounded-full"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              />
-              <span className="text-xs">Executing...</span>
-            </motion.div>
-          ) : (
-            <motion.span
-              initial={{ opacity: 0.8 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
-              className="text-sm"
-            >
-              ▶ Execute
-            </motion.span>
-          )}
+          <div className="flex items-center justify-center space-x-2">
+            {isExecuting ? (
+              <>
+                <motion.div
+                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+                <span>Executing...</span>
+              </>
+            ) : (
+              <>
+                <span>▶</span>
+                <span>Execute</span>
+              </>
+            )}
+          </div>
         </motion.button>
+
+        {/* Error Display */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mt-2"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              ❌ {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Success Display */}
+        <AnimatePresence>
+          {executionResult && (
+            <motion.div
+              className="text-xs text-green-600 bg-green-50 border border-green-200 rounded p-2 mt-2"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              ✅ {executionResult.message}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Animated status indicator */}
-      <motion.div
-        className="absolute -bottom-1 left-1/2 transform -translate-x-1/2"
-        animate={{
-          scale: isExecuting ? [1, 1.2, 1] : 0,
-          opacity: isExecuting ? [0.8, 1, 0.8] : 0
+      {/* Output Handle */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="output"
+        style={{
+          background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+          width: '10px',
+          height: '10px',
+          border: '2px solid white'
         }}
-        transition={{
-          duration: 0.8,
-          repeat: isExecuting ? Infinity : 0,
-          ease: "easeInOut"
-        }}
-      >
-        <div className={`w-2 h-2 rounded-full ${isExecuting ? 'bg-red-500' : 'bg-green-500'}`} />
-      </motion.div>
+        isConnectable={isConnectable}
+      />
     </motion.div>
   );
 };

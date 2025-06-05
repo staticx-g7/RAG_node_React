@@ -6,6 +6,46 @@ const PlayButton = ({ nodeId, nodeType, onExecute, disabled = false }) => {
   const [isExecuting, setIsExecuting] = useState(false);
   const { getNodes, getEdges } = useReactFlow();
 
+  const triggerNextNodes = async (currentNodeId) => {
+    const edges = getEdges();
+    const nodes = getNodes();
+
+    // Find all outgoing edges from current node
+    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
+
+    if (outgoingEdges.length > 0) {
+      console.log(`🔗 PlayButton: Found ${outgoingEdges.length} connected node(s) to trigger`);
+
+      // Trigger each connected node with a small delay
+      for (let i = 0; i < outgoingEdges.length; i++) {
+        const edge = outgoingEdges[i];
+        const targetNode = nodes.find(node => node.id === edge.target);
+
+        if (targetNode) {
+          console.log(`🎯 PlayButton: Triggering ${targetNode.type} node ${edge.target}`);
+
+          // Use setTimeout to ensure proper event handling
+          setTimeout(() => {
+            // Dispatch multiple event types to ensure compatibility
+            window.dispatchEvent(new CustomEvent('triggerExecution', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
+
+            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
+
+            window.dispatchEvent(new CustomEvent('autoExecute', {
+              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
+            }));
+          }, i * 500); // Increased delay to 500ms for better visibility
+        }
+      }
+    } else {
+      console.log(`⏹️ PlayButton: No connected nodes found after ${nodeType} node ${currentNodeId}`);
+    }
+  };
+
   const handlePlay = async (e) => {
     e.stopPropagation();
 
@@ -36,13 +76,11 @@ const PlayButton = ({ nodeId, nodeType, onExecute, disabled = false }) => {
 
       console.log(`✅ PlayButton: Successfully executed ${nodeType} node ${nodeId}`);
 
-      // Trigger next nodes in the chain
-      setTimeout(() => {
-        console.log(`🔗 PlayButton: Triggering next nodes after ${nodeType} completion`);
-        window.dispatchEvent(new CustomEvent('executionComplete', {
-          detail: { nodeId }
-        }));
-      }, 500);
+      // Wait a bit before triggering next nodes
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Trigger next nodes in the chain after execution completes
+      await triggerNextNodes(nodeId);
 
     } catch (error) {
       console.error(`❌ PlayButton: Execution failed for ${nodeType} node ${nodeId}:`, error.message);
@@ -53,17 +91,22 @@ const PlayButton = ({ nodeId, nodeType, onExecute, disabled = false }) => {
 
   // Listen for auto-execution triggers
   useEffect(() => {
-    const handleTriggerPlayButton = (event) => {
+    const handleAutoExecution = (event) => {
       if (event.detail.nodeId === nodeId) {
         console.log(`🎯 PlayButton: Auto-triggered for ${nodeType} node ${nodeId}`);
         handlePlay({ stopPropagation: () => {} });
       }
     };
 
-    window.addEventListener('triggerPlayButton', handleTriggerPlayButton);
+    // Listen for multiple event types
+    window.addEventListener('triggerPlayButton', handleAutoExecution);
+    window.addEventListener('triggerExecution', handleAutoExecution);
+    window.addEventListener('autoExecute', handleAutoExecution);
 
     return () => {
-      window.removeEventListener('triggerPlayButton', handleTriggerPlayButton);
+      window.removeEventListener('triggerPlayButton', handleAutoExecution);
+      window.removeEventListener('triggerExecution', handleAutoExecution);
+      window.removeEventListener('autoExecute', handleAutoExecution);
     };
   }, [nodeId, nodeType]);
 

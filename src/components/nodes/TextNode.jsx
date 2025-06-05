@@ -121,6 +121,28 @@ const TextNode = ({ id, data, isConnectable, selected }) => {
       return null;
   }
 };
+  // Add this useEffect to your TextNode component
+  useEffect(() => {
+    const handleAutoExecution = (event) => {
+      if (event.detail.nodeId === id) {
+        console.log(`🎯 TextNode: Auto-triggered for node ${id}`);
+        // TextNode doesn't need complex execution, just pass data forward
+        console.log(`📤 TextNode: Forwarding data - "${inputValue}"`);
+      }
+    };
+
+    // Listen for multiple event types
+    window.addEventListener('triggerExecution', handleAutoExecution);
+    window.addEventListener('triggerPlayButton', handleAutoExecution);
+    window.addEventListener('autoExecute', handleAutoExecution);
+
+    return () => {
+      window.removeEventListener('triggerExecution', handleAutoExecution);
+      window.removeEventListener('triggerPlayButton', handleAutoExecution);
+      window.removeEventListener('autoExecute', handleAutoExecution);
+    };
+  }, [id, inputValue]);
+  
 
 
   const validationStatus = getValidationStatus();
