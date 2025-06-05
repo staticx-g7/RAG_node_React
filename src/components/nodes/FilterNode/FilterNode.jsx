@@ -13,19 +13,20 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
   const [selectedFolders, setSelectedFolders] = useState(new Set());
   const [selectedFormats, setSelectedFormats] = useState(new Set());
   const [folderSearchTerm, setFolderSearchTerm] = useState('');
+  const [formatSearchTerm, setFormatSearchTerm] = useState('');
   const [includeRootFiles, setIncludeRootFiles] = useState(true);
+  const [showUnknownFormats, setShowUnknownFormats] = useState(true);
 
   const { setNodes, getNodes, getEdges } = useReactFlow();
   const nodeRef = useRef(null);
 
-  // Motion values declared at top level
+  // Motion values
   const scale = useMotionValue(1);
   const y = useMotionValue(0);
   const glowOpacity = useMotionValue(0);
   const selectedFoldersCount = useMotionValue(0);
   const selectedFormatsCount = useMotionValue(0);
 
-  // Transform values
   const boxShadow = useTransform(
     [scale, glowOpacity],
     ([s, glow]) => `0px ${s * 8}px ${s * 25}px rgba(147, 51, 234, ${glow * 0.15})`
@@ -33,10 +34,10 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
 
   const pulseScale = useTransform(glowOpacity, [0, 1], [1, 1.02]);
   const foldersCountScale = useTransform(selectedFoldersCount, [0, 10], [1, 1.2]);
-  const formatsCountScale = useTransform(selectedFormatsCount, [0, 20], [1, 1.2]);
+  const formatsCountScale = useTransform(selectedFormatsCount, [0, 50], [1, 1.2]);
 
-  // Static format definitions - moved outside to prevent re-initialization
-  const formatDefinitions = useMemo(() => new Map([
+  // Known formats map
+  const knownFormats = useMemo(() => new Map([
     ['js', { icon: '🟨', category: 'Programming', description: 'JavaScript' }],
     ['jsx', { icon: '⚛️', category: 'Programming', description: 'React JSX' }],
     ['ts', { icon: '🔷', category: 'Programming', description: 'TypeScript' }],
@@ -52,34 +53,28 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     ['rb', { icon: '💎', category: 'Programming', description: 'Ruby' }],
     ['go', { icon: '🐹', category: 'Programming', description: 'Go' }],
     ['rs', { icon: '🦀', category: 'Programming', description: 'Rust' }],
+    ['sh', { icon: '🐚', category: 'Programming', description: 'Shell Script' }],
+    ['bat', { icon: '🦇', category: 'Programming', description: 'Batch File' }],
     ['html', { icon: '🌐', category: 'Web', description: 'HTML' }],
     ['css', { icon: '🎨', category: 'Web', description: 'CSS' }],
     ['scss', { icon: '🎨', category: 'Web', description: 'SASS' }],
-    ['sass', { icon: '🎨', category: 'Web', description: 'SASS' }],
-    ['less', { icon: '🎨', category: 'Web', description: 'LESS' }],
     ['vue', { icon: '💚', category: 'Web', description: 'Vue.js' }],
-    ['svelte', { icon: '🧡', category: 'Web', description: 'Svelte' }],
     ['json', { icon: '📋', category: 'Data', description: 'JSON' }],
     ['xml', { icon: '📄', category: 'Data', description: 'XML' }],
     ['csv', { icon: '📊', category: 'Data', description: 'CSV' }],
+    ['sql', { icon: '🗄️', category: 'Data', description: 'SQL' }],
     ['yml', { icon: '⚙️', category: 'Config', description: 'YAML' }],
     ['yaml', { icon: '⚙️', category: 'Config', description: 'YAML' }],
     ['toml', { icon: '⚙️', category: 'Config', description: 'TOML' }],
     ['ini', { icon: '⚙️', category: 'Config', description: 'INI' }],
     ['env', { icon: '🔐', category: 'Config', description: 'Environment' }],
-    ['config', { icon: '⚙️', category: 'Config', description: 'Config' }],
-    ['conf', { icon: '⚙️', category: 'Config', description: 'Config' }],
     ['md', { icon: '📝', category: 'Documentation', description: 'Markdown' }],
     ['txt', { icon: '📄', category: 'Documentation', description: 'Text' }],
-    ['rst', { icon: '📝', category: 'Documentation', description: 'reStructuredText' }],
-    ['adoc', { icon: '📝', category: 'Documentation', description: 'AsciiDoc' }],
     ['png', { icon: '🖼️', category: 'Image', description: 'PNG' }],
     ['jpg', { icon: '🖼️', category: 'Image', description: 'JPEG' }],
     ['jpeg', { icon: '🖼️', category: 'Image', description: 'JPEG' }],
     ['gif', { icon: '🖼️', category: 'Image', description: 'GIF' }],
     ['svg', { icon: '🎨', category: 'Image', description: 'SVG' }],
-    ['webp', { icon: '🖼️', category: 'Image', description: 'WebP' }],
-    ['ico', { icon: '🖼️', category: 'Image', description: 'Icon' }],
     ['pdf', { icon: '📕', category: 'Document', description: 'PDF' }],
     ['doc', { icon: '📄', category: 'Document', description: 'Word Document' }],
     ['docx', { icon: '📄', category: 'Document', description: 'Word Document' }],
@@ -88,8 +83,6 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     ['license', { icon: '📜', category: 'Documentation', description: 'License' }],
     ['readme', { icon: '📖', category: 'Documentation', description: 'README' }],
     ['makefile', { icon: '🔨', category: 'Build', description: 'Makefile' }],
-    ['cmake', { icon: '🔨', category: 'Build', description: 'CMake' }],
-    ['gradle', { icon: '🔨', category: 'Build', description: 'Gradle' }],
     ['package', { icon: '📦', category: 'Package', description: 'Package' }],
     ['lock', { icon: '🔒', category: 'Package', description: 'Lock File' }],
   ]), []);
@@ -137,7 +130,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     selectedFormatsCount.set(selectedFormats.size);
   }, [selectedFormats.size, selectedFormatsCount]);
 
-  // Debounced node data update
+  // Node data update
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       setNodes((nodes) =>
@@ -152,6 +145,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                 selectedFolders: Array.from(selectedFolders),
                 selectedFormats: Array.from(selectedFormats),
                 includeRootFiles,
+                showUnknownFormats,
                 lastUpdated: new Date().toISOString()
               }
             };
@@ -162,7 +156,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [inputData, filteredData, selectedFolders, selectedFormats, includeRootFiles, id, setNodes]);
+  }, [inputData, filteredData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id, setNodes]);
 
   // Listen for data from connected GitNode
   useEffect(() => {
@@ -186,7 +180,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     checkForInputData();
   }, [getEdges, getNodes, id]);
 
-  // FIXED: Stable filtered folders calculation
+  // Filtered folders
   const filteredFolders = useMemo(() => {
     if (!inputData || !inputData.contents) return [];
 
@@ -204,111 +198,168 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     );
   }, [inputData, folderSearchTerm]);
 
-  // FIXED: Completely rewritten format detection logic
+  // FIXED: Simplified format detection that always works
   const availableFormats = useMemo(() => {
     if (!inputData || !inputData.contents) {
-      console.log('No input data available for format detection');
-      return new Map();
+      console.log('❌ No input data for format detection');
+      return [];
     }
 
-    console.log('Detecting formats from input data:', inputData.contents.length, 'items');
+    console.log('🔍 Detecting formats from', inputData.contents.length, 'items');
 
-    const formatCategories = new Map();
-    const processedFormats = new Set();
+    const formatMap = new Map();
 
-    // Helper function to get format info for a file
-    const getFileFormat = (fileName) => {
-      const lowerName = fileName.toLowerCase();
+    // Get files to process
+    let filesToProcess = [];
 
-      // Special file name patterns
-      if (lowerName === 'dockerfile') return { key: 'dockerfile', format: formatDefinitions.get('dockerfile') };
-      if (lowerName.startsWith('readme')) return { key: 'readme', format: formatDefinitions.get('readme') };
-      if (lowerName === 'license' || lowerName === 'licence') return { key: 'license', format: formatDefinitions.get('license') };
-      if (lowerName === '.gitignore') return { key: 'gitignore', format: formatDefinitions.get('gitignore') };
-      if (lowerName === 'makefile') return { key: 'makefile', format: formatDefinitions.get('makefile') };
-      if (lowerName === 'package.json') return { key: 'package', format: formatDefinitions.get('package') };
-      if (lowerName.endsWith('.lock')) return { key: 'lock', format: formatDefinitions.get('lock') };
-
-      // Extension-based detection
-      const parts = fileName.split('.');
-      if (parts.length > 1) {
-        const ext = parts[parts.length - 1].toLowerCase();
-        const format = formatDefinitions.get(ext);
-        if (format) {
-          return { key: ext, format };
-        }
+    if (selectedFolders.size === 0) {
+      // If no folders selected, show all files or just root files
+      if (includeRootFiles) {
+        filesToProcess = inputData.contents.filter(item =>
+          item.type === 'file' && !item.path.includes('/')
+        );
+      } else {
+        filesToProcess = inputData.contents.filter(item => item.type === 'file');
       }
-
-      return null;
-    };
-
-    // Helper function to add format to categories
-    const addFormatToCategories = (formatKey, format) => {
-      if (!formatCategories.has(format.category)) {
-        formatCategories.set(format.category, []);
-      }
-
-      const categoryFormats = formatCategories.get(format.category);
-      if (!categoryFormats.some(f => f.ext === formatKey)) {
-        categoryFormats.push({ ext: formatKey, ...format });
-        processedFormats.add(formatKey);
-      }
-    };
-
-    // Determine which files to process based on current selection
-    const filesToProcess = [];
-
-    // If root files are included, add root files
-    if (includeRootFiles) {
-      const rootFiles = inputData.contents.filter(item =>
-        item.type === 'file' && !item.path.includes('/')
-      );
-      filesToProcess.push(...rootFiles);
-      console.log('Added', rootFiles.length, 'root files for processing');
-    }
-
-    // If folders are selected, add files from those folders
-    if (selectedFolders.size > 0) {
+    } else {
+      // Process files from selected folders
       selectedFolders.forEach(folderPath => {
         if (folderPath === '') {
-          // Root folder - already handled above if includeRootFiles is true
-          if (!includeRootFiles) {
-            const rootFiles = inputData.contents.filter(item =>
-              item.type === 'file' && !item.path.includes('/')
-            );
-            filesToProcess.push(...rootFiles);
-          }
+          const rootFiles = inputData.contents.filter(item =>
+            item.type === 'file' && !item.path.includes('/')
+          );
+          filesToProcess.push(...rootFiles);
         } else {
-          // Specific folder
           const folderFiles = inputData.contents.filter(item =>
             item.type === 'file' && item.path.startsWith(folderPath + '/')
           );
           filesToProcess.push(...folderFiles);
-          console.log('Added', folderFiles.length, 'files from folder:', folderPath);
         }
       });
     }
 
-    console.log('Total files to process for format detection:', filesToProcess.length);
+    console.log('📊 Processing', filesToProcess.length, 'files for format detection');
 
-    // Process all files and detect formats
+    // Extract formats from files
     filesToProcess.forEach(file => {
-      const formatInfo = getFileFormat(file.name);
-      if (formatInfo && formatInfo.format) {
-        addFormatToCategories(formatInfo.key, formatInfo.format);
+      let formatKey = null;
+      let formatInfo = null;
+
+      const fileName = file.name.toLowerCase();
+
+      // Special files
+      if (fileName === 'dockerfile') {
+        formatKey = 'dockerfile';
+        formatInfo = knownFormats.get('dockerfile');
+      } else if (fileName.startsWith('readme')) {
+        formatKey = 'readme';
+        formatInfo = knownFormats.get('readme');
+      } else if (fileName === 'license' || fileName === 'licence') {
+        formatKey = 'license';
+        formatInfo = knownFormats.get('license');
+      } else if (fileName === '.gitignore') {
+        formatKey = 'gitignore';
+        formatInfo = knownFormats.get('gitignore');
+      } else if (fileName === 'makefile') {
+        formatKey = 'makefile';
+        formatInfo = knownFormats.get('makefile');
+      } else if (fileName === 'package.json') {
+        formatKey = 'package';
+        formatInfo = knownFormats.get('package');
+      } else if (fileName.endsWith('.lock')) {
+        formatKey = 'lock';
+        formatInfo = knownFormats.get('lock');
+      } else {
+        // Extension-based detection
+        const parts = file.name.split('.');
+        if (parts.length > 1) {
+          const ext = parts[parts.length - 1].toLowerCase();
+          formatKey = ext;
+          formatInfo = knownFormats.get(ext) || {
+            icon: '❓',
+            category: 'Unknown',
+            description: `${ext.toUpperCase()} File`
+          };
+        } else {
+          formatKey = 'no-extension';
+          formatInfo = {
+            icon: '📄',
+            category: 'Other',
+            description: 'No Extension'
+          };
+        }
+      }
+
+      if (formatKey && formatInfo) {
+        if (!formatMap.has(formatKey)) {
+          formatMap.set(formatKey, {
+            ext: formatKey,
+            ...formatInfo,
+            count: 0,
+            isKnown: knownFormats.has(formatKey)
+          });
+        }
+        const format = formatMap.get(formatKey);
+        format.count++;
       }
     });
 
-    // Sort formats within each category
-    formatCategories.forEach((formats, category) => {
-      formats.sort((a, b) => a.ext.localeCompare(b.ext));
+    // Convert to array and sort
+    const formats = Array.from(formatMap.values());
+    formats.sort((a, b) => {
+      // Sort by count (descending) then by name
+      if (b.count !== a.count) return b.count - a.count;
+      return a.ext.localeCompare(b.ext);
     });
 
-    console.log('Detected format categories:', Array.from(formatCategories.keys()));
-    console.log('Total unique formats:', processedFormats.size);
+    console.log('✅ Found', formats.length, 'unique formats');
+    return formats;
+  }, [inputData, selectedFolders, includeRootFiles, knownFormats]);
 
-    return formatCategories;
-  }, [inputData, selectedFolders, includeRootFiles, formatDefinitions]);
+  // Filter formats by search and unknown toggle
+  const displayFormats = useMemo(() => {
+    let filtered = availableFormats;
+
+    // Filter by search term
+    if (formatSearchTerm) {
+      filtered = filtered.filter(format =>
+        format.ext.toLowerCase().includes(formatSearchTerm.toLowerCase()) ||
+        format.description.toLowerCase().includes(formatSearchTerm.toLowerCase()) ||
+        format.category.toLowerCase().includes(formatSearchTerm.toLowerCase())
+      );
+    }
+
+    // Filter by unknown formats toggle
+    if (!showUnknownFormats) {
+      filtered = filtered.filter(format => format.isKnown);
+    }
+
+    return filtered;
+  }, [availableFormats, formatSearchTerm, showUnknownFormats]);
+
+  // Group formats by category for display
+  const groupedFormats = useMemo(() => {
+    const groups = new Map();
+
+    displayFormats.forEach(format => {
+      if (!groups.has(format.category)) {
+        groups.set(format.category, []);
+      }
+      groups.get(format.category).push(format);
+    });
+
+    // Sort categories
+    const sortedGroups = new Map();
+    const categoryOrder = ['Programming', 'Web', 'Data', 'Config', 'Documentation', 'Image', 'Document', 'Build', 'Package', 'Unknown', 'Other'];
+
+    categoryOrder.forEach(category => {
+      if (groups.has(category)) {
+        sortedGroups.set(category, groups.get(category));
+      }
+    });
+
+    return sortedGroups;
+  }, [displayFormats]);
 
   const applyFilters = useCallback(async () => {
     if (!inputData || !inputData.contents) {
@@ -317,9 +368,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     }
 
     setIsProcessing(true);
-    console.log(`🔍 FilterNode ${id}: Applying smart filters ✨`);
+    console.log(`🔍 FilterNode ${id}: Applying filters`);
 
-    // Reduced processing time to minimize UI blocking
     await new Promise(resolve => setTimeout(resolve, 400));
 
     let filtered = [...inputData.contents];
@@ -345,7 +395,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
       });
     }
 
-    // Apply file format filtering
+    // Apply format filtering
     if (selectedFormats.size > 0) {
       filtered = filtered.filter(item => {
         if (item.type === 'folder') return true;
@@ -353,7 +403,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         const fileName = item.name.toLowerCase();
         const ext = item.name.split('.').pop()?.toLowerCase();
 
-        // Check special file patterns
+        // Check special files
         if (selectedFormats.has('dockerfile') && fileName === 'dockerfile') return true;
         if (selectedFormats.has('readme') && fileName.startsWith('readme')) return true;
         if (selectedFormats.has('license') && (fileName === 'license' || fileName === 'licence')) return true;
@@ -361,8 +411,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         if (selectedFormats.has('makefile') && fileName === 'makefile') return true;
         if (selectedFormats.has('package') && fileName === 'package.json') return true;
         if (selectedFormats.has('lock') && fileName.endsWith('.lock')) return true;
+        if (selectedFormats.has('no-extension') && !item.name.includes('.')) return true;
 
-        // Check extension-based formats
         return ext && selectedFormats.has(ext);
       });
     }
@@ -375,7 +425,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
       filterSettings: {
         selectedFolders: Array.from(selectedFolders),
         selectedFormats: Array.from(selectedFormats),
-        includeRootFiles
+        includeRootFiles,
+        showUnknownFormats
       },
       filteredAt: new Date().toISOString()
     };
@@ -383,8 +434,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     setFilteredData(result);
     setIsProcessing(false);
 
-    console.log(`✨ FilterNode ${id}: Filtering complete! ${inputData.contents.length} → ${filtered.length} items`);
-  }, [inputData, selectedFolders, selectedFormats, includeRootFiles, id]);
+    console.log(`✨ FilterNode ${id}: Complete! ${inputData.contents.length} → ${filtered.length} items`);
+  }, [inputData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id]);
 
   const handleNodeExecution = useCallback(async (inputData) => {
     console.log(`🎯 FilterNode ${id}: Executing with input data:`, inputData);
@@ -395,13 +446,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         setInputData(data.repoData);
       }
     });
-
-    if (Object.keys(inputData).length === 0) {
-      console.log(`⚠️ FilterNode ${id}: No input data available for filtering`);
-    }
   }, [id]);
 
-  // FIXED: Folder toggle without clearing formats unnecessarily
   const toggleFolder = useCallback((folderPath) => {
     setSelectedFolders(prev => {
       const newSelected = new Set(prev);
@@ -412,7 +458,6 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
       }
       return newSelected;
     });
-    // Don't clear formats automatically - let user decide
   }, []);
 
   const toggleFormat = useCallback((format) => {
@@ -437,18 +482,15 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
   }, []);
 
   const selectAllFormats = useCallback(() => {
-    const allFormats = new Set();
-    availableFormats.forEach(formats => {
-      formats.forEach(format => allFormats.add(format.ext));
-    });
+    const allFormats = new Set(displayFormats.map(format => format.ext));
     setSelectedFormats(allFormats);
-  }, [availableFormats]);
+  }, [displayFormats]);
 
   const clearAllFormats = useCallback(() => {
     setSelectedFormats(new Set());
   }, []);
 
-  // Simplified animation variants
+  // Animation variants
   const containerVariants = {
     initial: { opacity: 0, scale: 0.98 },
     animate: {
@@ -497,7 +539,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         scale: pulseScale,
         y,
         boxShadow,
-        minHeight: '400px'
+        minHeight: '500px'
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -507,7 +549,6 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         }
       }}
     >
-      {/* Processing glow effect */}
       <AnimatePresence>
         {isProcessing && (
           <motion.div
@@ -598,6 +639,27 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
           </motion.label>
         </motion.div>
 
+        {/* Unknown Formats Toggle */}
+        <motion.div className="mb-4" variants={itemVariants}>
+          <motion.label
+            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-800 border border-gray-300"
+            onMouseDown={handleInteractionEvent}
+            variants={buttonVariants}
+            initial="idle"
+            whileHover="hover"
+            whileTap="tap"
+          >
+            <motion.input
+              type="checkbox"
+              checked={showUnknownFormats}
+              onChange={(e) => setShowUnknownFormats(e.target.checked)}
+              onMouseDown={handleInteractionEvent}
+              className="w-3 h-3 text-gray-600 rounded focus:ring-gray-500"
+            />
+            <span>❓ Show Unknown File Formats</span>
+          </motion.label>
+        </motion.div>
+
         {/* Step 1: Folder Selection */}
         <motion.div className="mb-4" variants={itemVariants}>
           <motion.div className="flex items-center justify-between mb-2">
@@ -636,7 +698,6 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
             </div>
           </motion.div>
 
-          {/* Folder Search */}
           <motion.div className="mb-2" variants={itemVariants}>
             <motion.input
               type="text"
@@ -644,12 +705,11 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
               value={folderSearchTerm}
               onChange={(e) => setFolderSearchTerm(e.target.value)}
               onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-200"
+              className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               whileFocus={{ scale: 1.01 }}
             />
           </motion.div>
 
-          {/* Folder Checkboxes */}
           <motion.div
             className="space-y-1 max-h-32 overflow-y-auto nowheel"
             onMouseDown={handleInteractionEvent}
@@ -705,61 +765,67 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
           </AnimatePresence>
         </motion.div>
 
-        {/* Step 2: Format Selection - FIXED to always show when formats are available */}
-        <AnimatePresence>
-          {availableFormats.size > 0 && (
+        {/* Step 2: Format Selection - FIXED */}
+        <motion.div className="mb-4" variants={itemVariants}>
+          <motion.div className="flex items-center justify-between mb-2">
+            <motion.div className="text-xs font-medium text-gray-700">
+              📄 Step 2: Select File Formats
+              <motion.span
+                className="text-gray-500 ml-2"
+                style={{ scale: formatsCountScale }}
+              >
+                ({displayFormats.length} available)
+              </motion.span>
+            </motion.div>
+            <div className="flex space-x-1">
+              <motion.button
+                onClick={selectAllFormats}
+                onMouseDown={handleInteractionEvent}
+                className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
+                variants={buttonVariants}
+                initial="idle"
+                whileHover="hover"
+                whileTap="tap"
+              >
+                All
+              </motion.button>
+              <motion.button
+                onClick={clearAllFormats}
+                onMouseDown={handleInteractionEvent}
+                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
+                variants={buttonVariants}
+                initial="idle"
+                whileHover="hover"
+                whileTap="tap"
+              >
+                Clear
+              </motion.button>
+            </div>
+          </motion.div>
+
+          {/* Format Search */}
+          <motion.div className="mb-2" variants={itemVariants}>
+            <motion.input
+              type="text"
+              placeholder="🔍 Search file formats..."
+              value={formatSearchTerm}
+              onChange={(e) => setFormatSearchTerm(e.target.value)}
+              onMouseDown={handleInteractionEvent}
+              className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              whileFocus={{ scale: 1.01 }}
+            />
+          </motion.div>
+
+          {/* FIXED: Format Display */}
+          {displayFormats.length > 0 ? (
             <motion.div
-              className="mb-4"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3 }}
+              className="space-y-2 max-h-40 overflow-y-auto nowheel"
+              onMouseDown={handleInteractionEvent}
               variants={itemVariants}
             >
-              <motion.div className="flex items-center justify-between mb-2">
-                <motion.div className="text-xs font-medium text-gray-700">
-                  📄 Step 2: Select File Formats
-                  <motion.span
-                    className="text-gray-500 ml-2"
-                    style={{ scale: formatsCountScale }}
-                  >
-                    ({Array.from(availableFormats.values()).reduce((total, formats) => total + formats.length, 0)} available)
-                  </motion.span>
-                </motion.div>
-                <div className="flex space-x-1">
-                  <motion.button
-                    onClick={selectAllFormats}
-                    onMouseDown={handleInteractionEvent}
-                    className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
-                    variants={buttonVariants}
-                    initial="idle"
-                    whileHover="hover"
-                    whileTap="tap"
-                  >
-                    All
-                  </motion.button>
-                  <motion.button
-                    onClick={clearAllFormats}
-                    onMouseDown={handleInteractionEvent}
-                    className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
-                    variants={buttonVariants}
-                    initial="idle"
-                    whileHover="hover"
-                    whileTap="tap"
-                  >
-                    Clear
-                  </motion.button>
-                </div>
-              </motion.div>
-
-              {/* Format checkboxes */}
-              <motion.div
-                className="space-y-2 max-h-32 overflow-y-auto nowheel"
-                onMouseDown={handleInteractionEvent}
-                variants={itemVariants}
-              >
+              {groupedFormats.size > 0 ? (
                 <AnimatePresence mode="popLayout">
-                  {Array.from(availableFormats.entries()).map(([category, formats]) => (
+                  {Array.from(groupedFormats.entries()).map(([category, formats]) => (
                     <motion.div
                       key={`category-${category}`}
                       className="space-y-1"
@@ -768,10 +834,13 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                       exit={{ opacity: 0, x: -20 }}
                       layout
                     >
-                      <motion.div className="text-xs font-medium text-gray-600">
-                        {category} ({formats.length}):
+                      <motion.div className="text-xs font-medium text-gray-600 flex items-center justify-between">
+                        <span>{category} ({formats.length}):</span>
+                        {category === 'Unknown' && (
+                          <span className="text-xs text-orange-600">❓ Auto-detected</span>
+                        )}
                       </motion.div>
-                      <div className="grid grid-cols-3 gap-1">
+                      <div className="grid grid-cols-2 gap-1">
                         <AnimatePresence mode="popLayout">
                           {formats.map((format) => (
                             <motion.label
@@ -779,10 +848,12 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                               className={`inline-flex items-center space-x-1 px-2 py-1 rounded cursor-pointer transition-colors text-xs ${
                                 selectedFormats.has(format.ext)
                                   ? 'bg-green-100 border border-green-300 text-green-800'
-                                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                  : format.isKnown
+                                    ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                    : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200'
                               }`}
                               onMouseDown={handleInteractionEvent}
-                              title={format.description}
+                              title={`${format.description} (${format.count} files)`}
                               initial={{ opacity: 0, scale: 0.8 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.8 }}
@@ -799,7 +870,8 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                                 className="w-3 h-3 text-green-600 rounded focus:ring-green-500"
                               />
                               <span className="text-xs">{format.icon}</span>
-                              <span className="whitespace-nowrap text-xs">{format.ext}</span>
+                              <span className="whitespace-nowrap text-xs flex-1">{format.ext}</span>
+                              <span className="text-xs text-gray-400">({format.count})</span>
                             </motion.label>
                           ))}
                         </AnimatePresence>
@@ -807,36 +879,42 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-              </motion.div>
-
-              <AnimatePresence>
-                {selectedFormats.size > 0 && (
-                  <motion.div
-                    className="text-xs text-green-600 mt-1"
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                  >
-                    ✓ {selectedFormats.size} format{selectedFormats.size !== 1 ? 's' : ''} selected
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              ) : (
+                <div className="text-xs text-gray-500 text-center py-2">
+                  No formats found matching search criteria
+                </div>
+              )}
+            </motion.div>
+          ) : (
+            <motion.div
+              className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <div className="font-medium mb-1">🔍 Format Detection Debug:</div>
+              <div>• Total files in repo: {inputData ? inputData.contents.filter(item => item.type === 'file').length : 0}</div>
+              <div>• Selected folders: {selectedFolders.size}</div>
+              <div>• Include root files: {includeRootFiles ? 'Yes' : 'No'}</div>
+              <div>• Available formats: {availableFormats.length}</div>
+              {selectedFolders.size === 0 && !includeRootFiles && (
+                <div className="text-red-600 mt-1">⚠️ Select folders or enable root files to see formats</div>
+              )}
             </motion.div>
           )}
-        </AnimatePresence>
 
-        {/* Debug info for format detection */}
-        {inputData && availableFormats.size === 0 && (
-          <motion.div
-            className="mb-3 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
-            ⚠️ No file formats detected.
-            {selectedFolders.size === 0 && !includeRootFiles && ' Select folders or enable root files first.'}
-            {(selectedFolders.size > 0 || includeRootFiles) && ' The selected location may not contain supported file types.'}
-          </motion.div>
-        )}
+          <AnimatePresence>
+            {selectedFormats.size > 0 && (
+              <motion.div
+                className="text-xs text-green-600 mt-1"
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+              >
+                ✓ {selectedFormats.size} format{selectedFormats.size !== 1 ? 's' : ''} selected
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
 
         {/* Apply Filters Button */}
         <motion.button
@@ -946,7 +1024,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                           layout
                         >
                           <span className="text-sm">
-                            {item.type === 'folder' ? '📁' : (formatDefinitions.get(item.name.split('.').pop()?.toLowerCase())?.icon || '📄')}
+                            {item.type === 'folder' ? '📁' : (knownFormats.get(item.name.split('.').pop()?.toLowerCase())?.icon || '📄')}
                           </span>
                           <span className="text-xs text-gray-700 flex-1">{item.name}</span>
                         </motion.div>
