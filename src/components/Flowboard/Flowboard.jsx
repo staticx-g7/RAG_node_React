@@ -476,6 +476,40 @@ const FlowboardComponent = () => {
     };
   }, [triggerNodeExecution, onDeleteNode, onDeleteEdge]);
 
+  React.useEffect(() => {
+    const handleExecutionComplete = (event) => {
+      const { nodeId } = event.detail;
+      const edges = getEdges();
+      const nodes = getNodes();
+
+      // Find all nodes connected to the completed node
+      const outgoingEdges = edges.filter(edge => edge.source === nodeId);
+
+      if (outgoingEdges.length > 0) {
+        console.log(`🔗 Flowboard: Node ${nodeId} completed, triggering ${outgoingEdges.length} connected node(s)`);
+
+        // Trigger each connected node with a delay
+        outgoingEdges.forEach((edge, index) => {
+          setTimeout(() => {
+            const targetNode = nodes.find(node => node.id === edge.target);
+            if (targetNode) {
+              console.log(`🎯 Flowboard: Auto-triggering ${targetNode.type} node ${edge.target}`);
+              window.dispatchEvent(new CustomEvent('triggerPlayButton', {
+                detail: { nodeId: edge.target }
+              }));
+            }
+          }, index * 300); // Stagger the execution
+        });
+      }
+    };
+
+    window.addEventListener('executionComplete', handleExecutionComplete);
+
+    return () => {
+      window.removeEventListener('executionComplete', handleExecutionComplete);
+    };
+  }, [getEdges, getNodes]);
+
   return (
     <div
       className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-inner border border-gray-200 relative"

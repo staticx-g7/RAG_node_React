@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
+import PlayButton from '../ui/PlayButton';
 
 const ExecuteNode = ({ id, data, isConnectable, selected }) => {
   const [isExecuting, setIsExecuting] = useState(false);
@@ -11,11 +12,71 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
     window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
   };
 
+  // Main execution handler for PlayButton integration
+  const handleNodeExecution = async (inputData) => {
+    console.log(`🎯 ExecuteNode ${id}: Starting execution with input data:`, inputData);
+
+    setIsExecuting(true);
+
+    try {
+      const edges = getEdges();
+      const nodes = getNodes();
+
+      // Find all nodes connected to this ExecuteNode
+      const outgoingEdges = edges.filter(edge => edge.source === id);
+
+      if (outgoingEdges.length === 0) {
+        console.log(`⚠️ ExecuteNode ${id}: No nodes connected to execution node`);
+        return;
+      }
+
+      console.log(`▶️ ExecuteNode ${id}: Will trigger ${outgoingEdges.length} connected node(s)`);
+
+      // Process any input data from connected nodes
+      if (Object.keys(inputData).length > 0) {
+        console.log(`📊 ExecuteNode ${id}: Processing ${Object.keys(inputData).length} input connection(s)`);
+
+        // Update connected nodes with execution state
+        outgoingEdges.forEach(edge => {
+          const targetNode = nodes.find(node => node.id === edge.target);
+          if (targetNode) {
+            setNodes((nodes) =>
+              nodes.map((node) => {
+                if (node.id === targetNode.id) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      isExecuting: true,
+                      lastExecutedBy: id,
+                      executionTime: new Date().toISOString()
+                    }
+                  };
+                }
+                return node;
+              })
+            );
+          }
+        });
+      }
+
+      // Simulate execution processing time
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      console.log(`🚀 ExecuteNode ${id}: Execution completed, chain will continue automatically`);
+
+    } catch (error) {
+      console.error(`❌ ExecuteNode ${id}: Execution failed:`, error.message);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // Legacy execution function for backward compatibility
   const executeConnectedNodes = async () => {
     const edges = getEdges();
     const nodes = getNodes();
 
-    // Find all edges that start from this node
     const outgoingEdges = edges.filter(edge => edge.source === id);
 
     if (outgoingEdges.length === 0) {
@@ -25,13 +86,11 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
 
     console.log(`▶️ Executing ${outgoingEdges.length} connected node(s) from ${data.label || 'Execute Node'}`);
 
-    // Execute each connected node
     for (const edge of outgoingEdges) {
       const targetNode = nodes.find(node => node.id === edge.target);
       if (targetNode) {
         console.log(`✅ Processing: ${targetNode.data.label}`);
 
-        // Update the target node to show it's being executed
         setNodes((nodes) =>
           nodes.map((node) => {
             if (node.id === targetNode.id) {
@@ -49,12 +108,10 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
           })
         );
 
-        // Simulate execution delay
         await new Promise(resolve => setTimeout(resolve, 500));
 
         console.log(`🎉 Completed: ${targetNode.data.label}`);
 
-        // Reset execution state and trigger cascading execution
         setNodes((nodes) =>
           nodes.map((node) => {
             if (node.id === targetNode.id) {
@@ -71,7 +128,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
           })
         );
 
-        // Trigger cascading execution for workflow automation
+        // Trigger cascading execution
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('executionComplete', {
             detail: { nodeId: targetNode.id }
@@ -83,6 +140,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
     console.log(`🚀 Execution flow completed successfully!`);
   };
 
+  // Handle manual execute button click (legacy)
   const handleExecute = async (e) => {
     e.stopPropagation();
     setIsExecuting(true);
@@ -99,11 +157,11 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
   };
 
   // Listen for auto-execution triggers from other nodes
-  React.useEffect(() => {
+  useEffect(() => {
     const handleTriggerExecution = (event) => {
       if (event.detail.nodeId === id) {
         console.log(`🎯 Auto-triggering execution for ExecuteNode: ${id}`);
-        handleExecute({ stopPropagation: () => {} });
+        handleNodeExecution({});
       }
     };
 
@@ -119,7 +177,6 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
       className={`relative w-32 h-20 border-2 rounded-xl shadow-lg transition-all duration-200 group ${
         selected ? 'border-purple-600 ring-2 ring-purple-200' : 'border-purple-400'
       }`}
-      // Animated background color transition for visual feedback
       animate={{
         background: isExecuting
           ? 'linear-gradient(135deg, #fecaca 0%, #ef4444 50%, #dc2626 100%)' // Red gradient when executing
@@ -129,21 +186,31 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         duration: 0.6,
         ease: "easeInOut"
       }}
-      // Pulse animation during execution
       style={{
         scale: isExecuting ? [1, 1.05, 1] : 1,
       }}
     >
-      {/* Delete button */}
-      <button
+      {/* Corner Play Button */}
+      <PlayButton
+        nodeId={id}
+        nodeType="execute"
+        onExecute={handleNodeExecution}
+        disabled={isExecuting}
+      />
+
+      {/* Delete button - positioned in opposite corner */}
+      <motion.button
         onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 hover:scale-110 transition-all duration-200 shadow-lg z-10 ${
+        className={`absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 shadow-lg z-10 ${
           selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}
         title="Delete node"
+        whileHover={{ scale: 1.2, rotate: 90 }}
+        whileTap={{ scale: 0.9 }}
+        transition={{ type: "spring", stiffness: 500 }}
       >
         ×
-      </button>
+      </motion.button>
 
       {/* HANDLES - One per side for clean connectivity */}
       {/* Top Handle - Input (Blue) */}
@@ -206,7 +273,7 @@ const ExecuteNode = ({ id, data, isConnectable, selected }) => {
         }}
       />
 
-      {/* Centered Execute Button */}
+      {/* Centered Execute Button Content */}
       <div className="absolute inset-0 flex items-center justify-center p-2" style={{ zIndex: 1 }}>
         <motion.button
           onClick={handleExecute}

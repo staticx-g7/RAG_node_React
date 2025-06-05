@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
+import PlayButton from '../../ui/PlayButton';
 
 const GitNode = ({ id, data, isConnectable, selected }) => {
   const [platform, setPlatform] = useState(data?.platform || 'github');
@@ -20,7 +21,7 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
   };
 
-  // Prevent node deletion on keyboard input[1]
+  // Prevent node deletion on keyboard input
   const handleKeyDown = (e) => {
     e.stopPropagation();
   };
@@ -67,7 +68,7 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     }
   };
 
-  // Enhanced recursive fetch function
+  // Enhanced recursive fetch function based on search results
   const fetchRepoContents = async () => {
     if (!apiKey || !repoUrl) {
       setError('API key and repository URL are required');
@@ -85,39 +86,31 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     console.log(`🔍 GitNode ${id}: Fetching ${platform} repository contents recursively`);
 
     try {
-      const allContents = [];
+      let allContents = [];
       
-      // Recursive function to fetch directory contents
-      const fetchDirectory = async (dirPath = '') => {
-        let apiUrl, headers;
+      if (platform === 'github') {
+        // GitHub requires recursive fetching using tree traversal pattern
+        const fetchedPaths = new Set();
 
-        if (platform === 'github') {
+        const fetchDirectory = async (dirPath = '') => {
+          if (fetchedPaths.has(dirPath)) return; // Avoid infinite loops
+          fetchedPaths.add(dirPath);
+
           const pathParam = dirPath ? `/${dirPath}` : '';
-          apiUrl = `https://api.github.com/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}`;
-          headers = {
+          const apiUrl = `https://api.github.com/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}`;
+          const headers = {
             'Authorization': `token ${apiKey}`,
             'Accept': 'application/vnd.github.v3+json'
           };
-        } else {
-          // GitLab API with recursive parameter
-          const pathParam = dirPath ? `&path=${encodeURIComponent(dirPath)}` : '';
-          apiUrl = `https://gitlab.com/api/v4/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true${pathParam}`;
-          headers = {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          };
-        }
 
-        const response = await fetch(apiUrl, { headers });
-        
-        if (!response.ok) {
-          throw new Error(`${platform} API Error: ${response.status} ${response.statusText}`);
-        }
+          const response = await fetch(apiUrl, { headers });
 
-        const data = await response.json();
-        
-        // For GitHub, we need to recursively fetch subdirectories
-        if (platform === 'github') {
+          if (!response.ok) {
+            throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
+          }
+
+          const data = await response.json();
+
           for (const item of data) {
             const formattedItem = {
               name: item.name,
@@ -130,36 +123,43 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
             
             allContents.push(formattedItem);
             
-            // If it's a directory, fetch its contents recursively
+            // Recursive traversal for directories
             if (item.type === 'dir') {
               console.log(`📁 Fetching subdirectory: ${item.path}`);
               await fetchDirectory(item.path);
             }
           }
-        } else {
-          // GitLab returns recursive results by default
-          data.forEach(item => {
-            allContents.push({
-              name: item.name,
-              type: item.type === 'tree' ? 'folder' : 'file',
-              path: item.path,
-              size: 0, // GitLab tree API doesn't provide size
-              url: item.web_url,
-              depth: (item.path.match(/\//g) || []).length
-            });
-          });
-        }
-      };
+        };
 
-      await fetchDirectory();
+        await fetchDirectory();
 
-      // Sort contents: folders first, then files, both alphabetically
-      allContents.sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === 'folder' ? -1 : 1;
+      } else {
+        // GitLab API with recursive parameter gets everything at once
+        const apiUrl = `https://gitlab.com/api/v4/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000`;
+        const headers = {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        };
+
+        const response = await fetch(apiUrl, { headers });
+
+        if (!response.ok) {
+          throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
         }
-        return a.name.localeCompare(b.name);
-      });
+
+        const data = await response.json();
+
+        allContents = data.map(item => ({
+          name: item.name,
+          type: item.type === 'tree' ? 'folder' : 'file',
+          path: item.path,
+          size: 0, // GitLab tree API doesn't provide size
+          url: item.web_url,
+          depth: (item.path.match(/\//g) || []).length
+        }));
+      }
+
+      console.log(`📊 Raw items fetched:`, allContents.length);
 
       setRepoData({
         owner: parsedRepo.owner,
@@ -181,6 +181,36 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     }
   };
 
+  // PlayButton execution handler
+  const handleNodeExecution = async (inputData) => {
+    console.log(`🎯 GitNode ${id}: Executing with input data:`, inputData);
+
+    // Check for API key and repo URL from connected TextNodes
+    let apiKeyToUse = apiKey;
+    let repoUrlToUse = repoUrl;
+
+    Object.values(inputData).forEach(data => {
+      if (data.value && data.inputType === 'api-key') {
+        apiKeyToUse = data.value;
+        setApiKey(data.value);
+        console.log(`🔑 GitNode ${id}: Using API key from connected TextNode`);
+      }
+      if (data.value && data.inputType === 'url') {
+        repoUrlToUse = data.value;
+        setRepoUrl(data.value);
+        console.log(`🔗 GitNode ${id}: Using repo URL from connected TextNode`);
+      }
+    });
+
+    // Execute the repository fetch
+    if (apiKeyToUse && repoUrlToUse) {
+      await fetchRepoContents();
+      console.log(`✅ GitNode ${id}: Repository fetch completed`);
+    } else {
+      console.log(`⚠️ GitNode ${id}: Missing API key or repo URL for execution`);
+    }
+  };
+
   const toggleFolder = (folderPath) => {
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderPath)) {
@@ -191,18 +221,28 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     setExpandedFolders(newExpanded);
   };
 
-  // Enhanced tree organization function
+  // Tree organization function based on search results
   const organizeIntoTree = (items) => {
     const tree = [];
     const itemMap = new Map();
 
-    // Create a map of all items
-    items.forEach(item => {
-      itemMap.set(item.path, { ...item, children: [] });
+    // Sort items by path depth to ensure parents are processed before children
+    const sortedItems = [...items].sort((a, b) => {
+      const aDepth = (a.path.match(/\//g) || []).length;
+      const bDepth = (b.path.match(/\//g) || []).length;
+      return aDepth - bDepth;
+    });
+
+    // Create all items in the map first
+    sortedItems.forEach(item => {
+      itemMap.set(item.path, {
+        ...item,
+        children: []
+      });
     });
 
     // Build the tree structure
-    items.forEach(item => {
+    sortedItems.forEach(item => {
       const pathParts = item.path.split('/');
       
       if (pathParts.length === 1) {
@@ -212,9 +252,13 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
         // Find parent directory
         const parentPath = pathParts.slice(0, -1).join('/');
         const parent = itemMap.get(parentPath);
+        const current = itemMap.get(item.path);
         
-        if (parent) {
-          parent.children.push(itemMap.get(item.path));
+        if (parent && current) {
+          parent.children.push(current);
+        } else {
+          // If parent doesn't exist, add to root (fallback)
+          tree.push(itemMap.get(item.path));
         }
       }
     });
@@ -239,46 +283,21 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     return tree;
   };
 
-  // Helper function to get file icons based on extension
   const getFileIcon = (filename) => {
     const ext = filename.split('.').pop()?.toLowerCase();
     const iconMap = {
-      'js': '🟨',
-      'jsx': '⚛️',
-      'ts': '🔷',
-      'tsx': '⚛️',
-      'py': '🐍',
-      'java': '☕',
-      'cpp': '⚙️',
-      'c': '⚙️',
-      'html': '🌐',
-      'css': '🎨',
-      'scss': '🎨',
-      'json': '📋',
-      'md': '📝',
-      'txt': '📄',
-      'pdf': '📕',
-      'png': '🖼️',
-      'jpg': '🖼️',
-      'jpeg': '🖼️',
-      'gif': '🖼️',
-      'svg': '🎨',
-      'yml': '⚙️',
-      'yaml': '⚙️',
-      'xml': '📄',
-      'csv': '📊',
-      'sql': '🗄️',
-      'sh': '⚡',
-      'bat': '⚡',
-      'exe': '⚙️',
-      'zip': '📦',
-      'tar': '📦',
-      'gz': '📦'
+      'js': '🟨', 'jsx': '⚛️', 'ts': '🔷', 'tsx': '⚛️',
+      'py': '🐍', 'java': '☕', 'cpp': '⚙️', 'c': '⚙️',
+      'html': '🌐', 'css': '🎨', 'scss': '🎨',
+      'json': '📋', 'md': '📝', 'txt': '📄',
+      'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'svg': '🎨',
+      'yml': '⚙️', 'yaml': '⚙️', 'xml': '📄', 'csv': '📊',
+      'sql': '🗄️', 'sh': '⚡', 'bat': '⚡', 'exe': '⚙️',
+      'zip': '📦', 'tar': '📦', 'gz': '📦'
     };
     return iconMap[ext] || '📄';
   };
 
-  // Helper function to format file sizes
   const formatFileSize = (bytes) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -287,7 +306,6 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Enhanced tree item renderer with better depth handling
   const renderTreeItem = (item, depth = 0) => {
     const isFolder = item.type === 'folder';
     const isExpanded = expandedFolders.has(item.path);
@@ -306,7 +324,12 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
             isFolder ? 'hover:bg-blue-50' : 'hover:bg-gray-50'
           }`}
           style={{ paddingLeft: `${paddingLeft + 8}px` }}
-          onClick={() => isFolder && hasChildren && toggleFolder(item.path)}
+          onClick={() => {
+            if (isFolder && hasChildren) {
+              console.log(`🔄 Toggling folder: ${item.path} (${item.children.length} children)`);
+              toggleFolder(item.path);
+            }
+          }}
         >
           {isFolder && hasChildren && (
             <motion.span
@@ -329,6 +352,11 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
           {!isFolder && item.size > 0 && (
             <span className="text-xs text-gray-400 ml-2">
               {formatFileSize(item.size)}
+            </span>
+          )}
+          {isFolder && hasChildren && (
+            <span className="text-xs text-gray-400 ml-2">
+              ({item.children.length})
             </span>
           )}
         </div>
@@ -368,10 +396,18 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
       whileHover={{ scale: 1.02, y: -2 }}
       transition={{ type: "spring", stiffness: 400, damping: 25 }}
     >
+      {/* Corner Play Button */}
+      <PlayButton
+        nodeId={id}
+        nodeType="git"
+        onExecute={handleNodeExecution}
+        disabled={isLoading}
+      />
+
       {/* Delete button */}
       <motion.button
         onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 shadow-lg z-10 ${
+        className={`absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 shadow-lg z-10 ${
           selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}
         title="Delete node"
@@ -510,7 +546,7 @@ const GitNode = ({ id, data, isConnectable, selected }) => {
           )}
         </AnimatePresence>
 
-        {/* Enhanced Repository Data Display with Tree View */}
+        {/* Repository Data Display with Tree View */}
         <AnimatePresence>
           {repoData && (
             <motion.div
