@@ -138,6 +138,13 @@ const NodesTab = () => {
   description: 'Filter repository contents'
   },
   {
+    type: 'parsenode',
+    label: 'Parser',
+    icon: '📝',
+    color: 'bg-gradient-to-r from-purple-100 to-violet-100 border-purple-300 text-purple-800',
+    description: 'Reading and conversion of data'
+    },
+  {
     type: 'default',
     label: 'Process Node',
     icon: '⚙️',

@@ -1,15 +1,62 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 import PlayButton from '../../ui/PlayButton';
+
+// Simplified Background Beams (fixed pointer events)
+const BackgroundBeams = ({ className }) => (
+  <div className={`absolute inset-0 pointer-events-none ${className}`}>
+    <svg
+      className="absolute inset-0 h-full w-full opacity-20"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <pattern
+          id="filter-beams"
+          x="0"
+          y="0"
+          width="40"
+          height="40"
+          patternUnits="userSpaceOnUse"
+        >
+          <path
+            d="M0 40L40 0H20L0 20M40 40V20L20 40"
+            stroke="rgba(156, 163, 175, 0.1)"
+            fill="none"
+          />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#filter-beams)" />
+    </svg>
+  </div>
+);
+
+// Simplified floating icon (reduced animation)
+const FloatingIcon = ({ children, isProcessing }) => (
+  <motion.div
+    animate={{
+      y: [0, -2, 0],
+      rotate: isProcessing ? 360 : 0,
+    }}
+    transition={{
+      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
+      rotate: {
+        duration: isProcessing ? 2 : 0,
+        repeat: isProcessing ? Infinity : 0,
+        ease: "linear"
+      }
+    }}
+  >
+    {children}
+  </motion.div>
+);
 
 const FilterNode = ({ id, data, isConnectable, selected }) => {
   const [inputData, setInputData] = useState(data?.inputData || null);
   const [filteredData, setFilteredData] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
-  const [error, setError] = useState(null); // **ADDED: Missing error state**
+  const [error, setError] = useState(null);
 
   const [selectedFolders, setSelectedFolders] = useState(new Set());
   const [selectedFormats, setSelectedFormats] = useState(new Set());
@@ -22,19 +69,9 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
   const nodeRef = useRef(null);
   const applyButtonRef = useRef(null);
   const isInitializedRef = useRef(false);
-  const updateTimeoutRef = useRef(null); // **ADDED: Missing timeout ref**
+  const updateTimeoutRef = useRef(null);
 
-  // **FIXED: Simplified motion values to prevent concurrent rendering issues**
-  const scale = useMotionValue(1);
-  const y = useMotionValue(0);
-  const glowOpacity = useMotionValue(0);
-
-  const boxShadow = useTransform(
-    [scale, glowOpacity],
-    ([s, glow]) => `0px ${s * 8}px ${s * 25}px rgba(147, 51, 234, ${glow * 0.15})`
-  );
-
-  // **ADD CHAIN REACTION FUNCTIONALITY**
+  // **CHAIN REACTION FUNCTIONALITY**
   const triggerNextNodes = useCallback(async (currentNodeId) => {
     const edges = getEdges();
     const nodes = getNodes();
@@ -71,7 +108,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     }
   }, [getEdges, getNodes]);
 
-  // Known formats map (keeping your existing implementation)
+  // Known formats map
   const knownFormats = useMemo(() => new Map([
     ['js', { icon: '🟨', category: 'Programming', description: 'JavaScript' }],
     ['jsx', { icon: '⚛️', category: 'Programming', description: 'React JSX' }],
@@ -131,33 +168,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     e.stopPropagation();
   }, []);
 
-  // **FIXED: Simplified mouse handlers to prevent render conflicts**
-  const handleMouseEnter = useCallback(() => {
-    if (!selected && !isProcessing) {
-      setIsHovered(true);
-    }
-  }, [selected, isProcessing]);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsHovered(false);
-  }, []);
-
-  // **FIXED: Moved motion value updates to useEffect to prevent render conflicts**
-  useEffect(() => {
-    if (isProcessing) {
-      glowOpacity.set(0.5);
-      scale.set(1.02);
-    } else if (isHovered) {
-      glowOpacity.set(0.3);
-      scale.set(1.01);
-    } else {
-      glowOpacity.set(0);
-      scale.set(1);
-      y.set(0);
-    }
-  }, [isProcessing, isHovered, glowOpacity, scale, y]);
-
-  // **FIXED: Proper debounced node data update to prevent excessive re-renders**
+  // **DEBOUNCED NODE DATA UPDATE**
   useEffect(() => {
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
@@ -184,7 +195,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
           return node;
         })
       );
-    }, 1000); // Longer debounce to prevent concurrent rendering issues
+    }, 1000);
 
     return () => {
       if (updateTimeoutRef.current) {
@@ -193,7 +204,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     };
   }, [inputData, filteredData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id, setNodes]);
 
-  // **FIXED: Listen for data from connected GitNode with proper cleanup**
+  // **LISTEN FOR DATA FROM CONNECTED GITNODE**
   useEffect(() => {
     if (isInitializedRef.current) return;
 
@@ -222,7 +233,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     isInitializedRef.current = true;
   }, [getEdges, getNodes, id]);
 
-  // Filtered folders (keeping your existing implementation)
+  // Filtered folders
   const filteredFolders = useMemo(() => {
     if (!inputData || !inputData.contents) return [];
 
@@ -240,7 +251,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     );
   }, [inputData, folderSearchTerm]);
 
-  // **FIXED: Simplified format detection**
+  // Format detection
   const availableFormats = useMemo(() => {
     if (!inputData || !inputData.contents) {
       return [];
@@ -274,8 +285,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         });
       }
 
-      // **FIXED: Limit processing to prevent blocking**
-      const limitedFiles = filesToProcess.slice(0, 1000); // Limit to prevent blocking
+      const limitedFiles = filesToProcess.slice(0, 1000);
 
       limitedFiles.forEach(file => {
         let formatKey = null;
@@ -394,7 +404,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     return sortedGroups;
   }, [displayFormats]);
 
-  // **UPDATED APPLY FILTERS WITH CHAIN REACTION**
+  // **APPLY FILTERS WITH CHAIN REACTION**
   const applyFilters = useCallback(async () => {
     if (!inputData || !inputData.contents) {
       console.log(`⚠️ FilterNode ${id}: No data to filter`);
@@ -469,7 +479,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
       setFilteredData(result);
       console.log(`✨ FilterNode ${id}: Complete! ${inputData.contents.length} → ${filtered.length} items`);
 
-      // **ADD CHAIN REACTION: Trigger next nodes after filtering completes**
+      // **TRIGGER NEXT NODES**
       await new Promise(resolve => setTimeout(resolve, 500));
       await triggerNextNodes(id);
 
@@ -481,7 +491,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     }
   }, [inputData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id, triggerNextNodes]);
 
-  // **UPDATED NODE EXECUTION HANDLER**
+  // **NODE EXECUTION HANDLER**
   const handleNodeExecution = useCallback(async (inputData) => {
     console.log(`🎯 FilterNode ${id}: Executing with input data:`, inputData);
 
@@ -493,13 +503,10 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
         }
       });
 
-      // Auto-apply filters if we have data
       if (inputData && Object.keys(inputData).length > 0) {
         console.log(`🔄 FilterNode ${id}: Auto-applying filters after receiving data`);
-        // Wait a moment for UI to update
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Trigger the apply filters function
         if (applyButtonRef.current && !isProcessing) {
           console.log(`✅ FilterNode ${id}: Triggering apply filters button`);
           applyButtonRef.current.click();
@@ -555,20 +562,18 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     setSelectedFormats(new Set());
   }, []);
 
-  // **FIXED AUTO-EXECUTION EVENT LISTENER WITH CHAIN REACTION**
+  // **AUTO-EXECUTION EVENT LISTENER**
   useEffect(() => {
     const handleAutoExecution = (event) => {
       if (event.detail.nodeId === id) {
         console.log(`🎯 FilterNode ${id}: Auto-triggered for execution`);
 
-        // Method 1: Try direct button click first
         if (applyButtonRef.current && !isProcessing && inputData) {
           console.log(`✅ FilterNode ${id}: Triggering apply filters button click`);
           applyButtonRef.current.click();
           return;
         }
 
-        // Method 2: Direct function call if button click fails
         if (inputData && !isProcessing) {
           console.log(`✅ FilterNode ${id}: Direct function call for auto-execution`);
           applyFilters();
@@ -578,7 +583,6 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
       }
     };
 
-    // Listen for multiple event types
     window.addEventListener('triggerExecution', handleAutoExecution);
     window.addEventListener('triggerPlayButton', handleAutoExecution);
     window.addEventListener('autoExecute', handleAutoExecution);
@@ -590,225 +594,185 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
     };
   }, [id, inputData, isProcessing, applyFilters]);
 
-  // **FIXED: Simplified animation variants**
-  const containerVariants = {
-    initial: { opacity: 0 },
-    animate: { opacity: 1 }
-  };
-
-  const itemVariants = {
-    initial: { opacity: 0 },
-    animate: { opacity: 1 }
-  };
-
-  const buttonVariants = {
-    idle: { scale: 1 },
-    hover: { scale: 1.02 },
-    tap: { scale: 0.98 }
-  };
-
   return (
-    <motion.div 
+    <motion.div
       ref={nodeRef}
-      className={`relative w-80 bg-gradient-to-br from-purple-100 via-purple-150 to-purple-200 border-2 border-purple-300 rounded-xl shadow-lg group ${
-        selected ? 'ring-2 ring-purple-200' : ''
+      className={`relative w-80 bg-gradient-to-br from-indigo-50 via-blue-50 to-sky-50 border-2 border-indigo-200 rounded-xl shadow-lg group nowheel overflow-visible ${
+        selected ? 'ring-2 ring-indigo-300' : ''
       }`}
-      variants={containerVariants}
-      initial="initial"
-      animate="animate"
-      style={{
-        y,
-        boxShadow,
-        minHeight: '500px'
-      }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      style={{ minHeight: '500px' }}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
       onPointerDown={(e) => {
         if (e.target.closest('input, button, select, .nowheel')) {
           e.stopPropagation();
         }
       }}
+      whileHover={{
+        scale: 1.01,
+        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
+      }}
     >
-      {/* Simplified loading indicator */}
+      {/* Background Beams when processing */}
       <AnimatePresence>
         {isProcessing && (
-          <motion.div
-            className="absolute inset-0 rounded-xl bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 opacity-20"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 0.2 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          />
+          <BackgroundBeams className="opacity-20" />
         )}
       </AnimatePresence>
 
-      <PlayButton
-        nodeId={id}
-        nodeType="filter"
-        onExecute={handleNodeExecution}
-        disabled={isProcessing}
-      />
+      {/* **FIXED: PlayButton positioning - moved outside container** */}
+      <div className="absolute -top-4 -left-4 z-30">
+        <PlayButton
+          nodeId={id}
+          nodeType="filter"
+          onExecute={handleNodeExecution}
+          disabled={isProcessing}
+        />
+      </div>
 
+      {/* **FIXED: Delete button positioning - moved outside container** */}
       <motion.button
         onClick={handleDelete}
-        className={`absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 shadow-lg z-10 ${
+        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
           selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}
         title="Delete node"
-        variants={buttonVariants}
-        initial="idle"
-        whileHover="hover"
-        whileTap="tap"
+        whileHover={{ scale: 1.1, rotate: 90 }}
+        whileTap={{ scale: 0.9 }}
       >
         ×
       </motion.button>
 
+      {/* **FIXED: Input Handle - Made larger and more visible** */}
       <Handle
         type="target"
         position={Position.Left}
         id="input"
-        style={{ 
-          background: '#6b7280', 
-          width: '10px', 
-          height: '10px',
-          border: '2px solid white'
+        style={{
+          background: 'linear-gradient(45deg, #6366f1, #3b82f6)',
+          width: '16px',
+          height: '16px',
+          border: '3px solid white',
+          borderRadius: '50%',
+          boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)',
+          left: '-8px'
         }}
         isConnectable={isConnectable}
       />
 
-      <motion.div className="p-4 nowheel" variants={itemVariants}>
-        {/* Header */}
-        <motion.div className="flex items-center space-x-2 mb-4">
-          <motion.span 
-            className="text-xl"
-            animate={{
-              rotate: isProcessing ? 360 : 0
-            }}
-            transition={{
-              rotate: {
-                duration: 2,
-                repeat: isProcessing ? Infinity : 0,
-                ease: "linear"
-              }
-            }}
-          >
-            🔍
-          </motion.span>
-          <motion.h3 className="text-sm font-semibold text-purple-800">
-            Smart Filter ✨
-          </motion.h3>
-        </motion.div>
+      <div className="p-4 pt-8 nowheel">
+        {/* **FIXED: Header - Simplified** */}
+        <div className="flex items-center space-x-2 mb-4">
+          <FloatingIcon isProcessing={isProcessing}>
+            <span className="text-xl">🔍</span>
+          </FloatingIcon>
+          <h3 className="text-sm font-semibold text-indigo-800">
+            Smart Filter
+          </h3>
+        </div>
 
         {/* Root Files Toggle */}
-        <motion.div className="mb-4" variants={itemVariants}>
+        <div className="mb-4">
           <motion.label
-            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-yellow-100 to-orange-100 hover:from-yellow-200 hover:to-orange-200 text-yellow-800 border border-yellow-300"
+            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 text-emerald-700 border border-emerald-200 nodrag"
             onMouseDown={handleInteractionEvent}
-            variants={buttonVariants}
-            initial="idle"
-            whileHover="hover"
-            whileTap="tap"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             <motion.input
               type="checkbox"
               checked={includeRootFiles}
               onChange={(e) => setIncludeRootFiles(e.target.checked)}
               onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-yellow-600 rounded focus:ring-yellow-500"
+              className="w-3 h-3 text-emerald-600 rounded focus:ring-emerald-500 nodrag"
+              whileHover={{ scale: 1.1 }}
             />
             <span>📁 Include Root Directory Files</span>
           </motion.label>
-        </motion.div>
+        </div>
 
         {/* Unknown Formats Toggle */}
-        <motion.div className="mb-4" variants={itemVariants}>
+        <div className="mb-4">
           <motion.label
-            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-800 border border-gray-300"
+            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 text-rose-700 border border-rose-200 nodrag"
             onMouseDown={handleInteractionEvent}
-            variants={buttonVariants}
-            initial="idle"
-            whileHover="hover"
-            whileTap="tap"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             <motion.input
               type="checkbox"
               checked={showUnknownFormats}
               onChange={(e) => setShowUnknownFormats(e.target.checked)}
               onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-gray-600 rounded focus:ring-gray-500"
+              className="w-3 h-3 text-rose-600 rounded focus:ring-rose-500 nodrag"
+              whileHover={{ scale: 1.1 }}
             />
             <span>❓ Show Unknown File Formats</span>
           </motion.label>
-        </motion.div>
+        </div>
 
         {/* Step 1: Folder Selection */}
-        <motion.div className="mb-4" variants={itemVariants}>
-          <motion.div className="flex items-center justify-between mb-2">
-            <motion.div className="text-xs font-medium text-gray-700">
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-medium text-indigo-700">
               📁 Step 1: Select Folders ({selectedFolders.size})
-            </motion.div>
+            </div>
             <div className="flex space-x-1">
               <motion.button
                 onClick={selectAllFolders}
                 onMouseDown={handleInteractionEvent}
-                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
-                variants={buttonVariants}
-                initial="idle"
-                whileHover="hover"
-                whileTap="tap"
+                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 nodrag"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 All
               </motion.button>
               <motion.button
                 onClick={clearAllFolders}
                 onMouseDown={handleInteractionEvent}
-                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
-                variants={buttonVariants}
-                initial="idle"
-                whileHover="hover"
-                whileTap="tap"
+                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 nodrag"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 Clear
               </motion.button>
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div className="mb-2" variants={itemVariants}>
+          <div className="mb-2">
             <motion.input
               type="text"
               placeholder="🔍 Search folders..."
               value={folderSearchTerm}
               onChange={(e) => setFolderSearchTerm(e.target.value)}
               onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full p-2 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 text-indigo-800 nodrag"
+              whileFocus={{ scale: 1.01 }}
             />
-          </motion.div>
+          </div>
 
-          <motion.div
-            className="space-y-1 max-h-32 overflow-y-auto nowheel"
-            onMouseDown={handleInteractionEvent}
-            variants={itemVariants}
-          >
+          <div className="space-y-1 max-h-32 overflow-y-auto nowheel">
             <div className="grid grid-cols-1 gap-1">
               {filteredFolders.map((folder) => (
                 <motion.label
                   key={`folder-${folder.path || 'root'}`}
-                  className={`inline-flex items-center space-x-2 px-2 py-1 rounded cursor-pointer transition-colors text-xs ${
+                  className={`inline-flex items-center space-x-2 px-2 py-1 rounded cursor-pointer transition-colors text-xs nodrag ${
                     selectedFolders.has(folder.path)
                       ? 'bg-blue-100 border border-blue-300 text-blue-800'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
                   }`}
                   onMouseDown={handleInteractionEvent}
-                  variants={buttonVariants}
-                  whileHover="hover"
-                  whileTap="tap"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
                 >
                   <motion.input
                     type="checkbox"
                     checked={selectedFolders.has(folder.path)}
                     onChange={() => toggleFolder(folder.path)}
                     onMouseDown={handleInteractionEvent}
-                    className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
+                    className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500 nodrag"
+                    whileHover={{ scale: 1.1 }}
                   />
                   <span className="text-sm">📁</span>
                   <span className="flex-1 text-xs truncate" title={folder.path || 'Root Directory'}>
@@ -817,7 +781,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                 </motion.label>
               ))}
             </div>
-          </motion.div>
+          </div>
 
           {selectedFolders.size > 0 && (
             <motion.div
@@ -828,94 +792,84 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
               ✓ {selectedFolders.size} folder{selectedFolders.size !== 1 ? 's' : ''} selected
             </motion.div>
           )}
-        </motion.div>
+        </div>
 
         {/* Step 2: Format Selection */}
-        <motion.div className="mb-4" variants={itemVariants}>
-          <motion.div className="flex items-center justify-between mb-2">
-            <motion.div className="text-xs font-medium text-gray-700">
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-medium text-indigo-700">
               📄 Step 2: Select File Formats ({displayFormats.length} available)
-            </motion.div>
+            </div>
             <div className="flex space-x-1">
               <motion.button
                 onClick={selectAllFormats}
                 onMouseDown={handleInteractionEvent}
-                className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
-                variants={buttonVariants}
-                initial="idle"
-                whileHover="hover"
-                whileTap="tap"
+                className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 nodrag"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 All
               </motion.button>
               <motion.button
                 onClick={clearAllFormats}
                 onMouseDown={handleInteractionEvent}
-                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
-                variants={buttonVariants}
-                initial="idle"
-                whileHover="hover"
-                whileTap="tap"
+                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 nodrag"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
               >
                 Clear
               </motion.button>
             </div>
-          </motion.div>
+          </div>
 
           {/* Format Search */}
-          <motion.div className="mb-2" variants={itemVariants}>
+          <div className="mb-2">
             <motion.input
               type="text"
               placeholder="🔍 Search file formats..."
               value={formatSearchTerm}
               onChange={(e) => setFormatSearchTerm(e.target.value)}
               onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full p-2 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 text-indigo-800 nodrag"
+              whileFocus={{ scale: 1.01 }}
             />
-          </motion.div>
+          </div>
 
           {/* Format Display */}
           {displayFormats.length > 0 ? (
-            <motion.div
-              className="space-y-2 max-h-40 overflow-y-auto nowheel"
-              onMouseDown={handleInteractionEvent}
-              variants={itemVariants}
-            >
+            <div className="space-y-2 max-h-40 overflow-y-auto nowheel">
               {groupedFormats.size > 0 ? (
                 Array.from(groupedFormats.entries()).map(([category, formats]) => (
-                  <motion.div
-                    key={`category-${category}`}
-                    className="space-y-1"
-                  >
-                    <motion.div className="text-xs font-medium text-gray-600 flex items-center justify-between">
+                  <div key={`category-${category}`} className="space-y-1">
+                    <div className="text-xs font-medium text-indigo-600 flex items-center justify-between">
                       <span>{category} ({formats.length}):</span>
                       {category === 'Unknown' && (
                         <span className="text-xs text-orange-600">❓ Auto-detected</span>
                       )}
-                    </motion.div>
+                    </div>
                     <div className="grid grid-cols-2 gap-1">
                       {formats.map((format) => (
                         <motion.label
                           key={`format-${category}-${format.ext}`}
-                          className={`inline-flex items-center space-x-1 px-2 py-1 rounded cursor-pointer transition-colors text-xs ${
+                          className={`inline-flex items-center space-x-1 px-2 py-1 rounded cursor-pointer transition-colors text-xs nodrag ${
                             selectedFormats.has(format.ext)
                               ? 'bg-green-100 border border-green-300 text-green-800'
                               : format.isKnown
-                                ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
                                 : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200'
                           }`}
                           onMouseDown={handleInteractionEvent}
                           title={`${format.description} (${format.count} files)`}
-                          variants={buttonVariants}
-                          whileHover="hover"
-                          whileTap="tap"
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
                         >
                           <motion.input
                             type="checkbox"
                             checked={selectedFormats.has(format.ext)}
                             onChange={() => toggleFormat(format.ext)}
                             onMouseDown={handleInteractionEvent}
-                            className="w-3 h-3 text-green-600 rounded focus:ring-green-500"
+                            className="w-3 h-3 text-green-600 rounded focus:ring-green-500 nodrag"
+                            whileHover={{ scale: 1.1 }}
                           />
                           <span className="text-xs">{format.icon}</span>
                           <span className="whitespace-nowrap text-xs flex-1">{format.ext}</span>
@@ -923,20 +877,16 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
                         </motion.label>
                       ))}
                     </div>
-                  </motion.div>
+                  </div>
                 ))
               ) : (
                 <div className="text-xs text-gray-500 text-center py-2">
                   No formats found matching search criteria
                 </div>
               )}
-            </motion.div>
+            </div>
           ) : (
-            <motion.div
-              className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
+            <div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2">
               <div className="font-medium mb-1">🔍 Format Detection Debug:</div>
               <div>• Total files in repo: {inputData ? inputData.contents.filter(item => item.type === 'file').length : 0}</div>
               <div>• Selected folders: {selectedFolders.size}</div>
@@ -945,7 +895,7 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
               {selectedFolders.size === 0 && !includeRootFiles && (
                 <div className="text-red-600 mt-1">⚠️ Select folders or enable root files to see formats</div>
               )}
-            </motion.div>
+            </div>
           )}
 
           {selectedFormats.size > 0 && (
@@ -957,25 +907,26 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
               ✓ {selectedFormats.size} format{selectedFormats.size !== 1 ? 's' : ''} selected
             </motion.div>
           )}
-        </motion.div>
+        </div>
 
-        {/* **APPLY FILTERS BUTTON WITH REF FOR AUTO-EXECUTION** */}
+        {/* Apply Filters Button */}
         <motion.button
-          ref={applyButtonRef} // Add the ref here for auto-execution
+          ref={applyButtonRef}
           onClick={applyFilters}
           onMouseDown={handleInteractionEvent}
           disabled={isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles)}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 ${
+          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
             isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles)
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg'
+              ? 'bg-indigo-200 text-indigo-500 cursor-not-allowed'
+              : 'bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white shadow-lg'
           }`}
-          variants={buttonVariants}
-          initial="idle"
-          whileHover={!isProcessing && inputData && (selectedFolders.size > 0 || includeRootFiles) ? "hover" : "idle"}
-          whileTap={!isProcessing && inputData && (selectedFolders.size > 0 || includeRootFiles) ? "tap" : "idle"}
+          whileHover={{
+            scale: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? 1 : 1.02,
+            boxShadow: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? undefined : "0 8px 20px rgba(99, 102, 241, 0.3)"
+          }}
+          whileTap={{ scale: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? 1 : 0.98 }}
         >
-          <motion.div className="flex items-center justify-center space-x-2">
+          <div className="flex items-center justify-center space-x-2">
             {isProcessing ? (
               <>
                 <motion.div
@@ -989,117 +940,123 @@ const FilterNode = ({ id, data, isConnectable, selected }) => {
               <>
                 <span>🔍</span>
                 <span>Apply Smart Filter</span>
-                <span>✨</span>
               </>
             )}
-          </motion.div>
+          </div>
         </motion.button>
 
         {/* Connection Status */}
-        <motion.div className="mb-3" variants={itemVariants}>
-          <motion.div
+        <div className="mb-3">
+          <div
             className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
               inputData
-                ? 'bg-green-100 text-green-700 border border-green-300'
-                : 'bg-gray-100 text-gray-600 border border-gray-300'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
             }`}
           >
-            <span>
-              {inputData ? '🔗 Connected to GitNode' : '⏸️ Waiting for GitNode data'}
-            </span>
-          </motion.div>
-        </motion.div>
+            {inputData ? '🔗 Connected to GitNode' : '⏸️ Waiting for GitNode data'}
+          </div>
+        </div>
 
-        {/* **ADDED: Error Display** */}
-        {error && (
-          <motion.div
-            className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            ❌ {error}
-          </motion.div>
-        )}
+        {/* Error Display */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
+              initial={{ opacity: 0, y: -10, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+            >
+              ❌ {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Filter Results */}
-        {filteredData && (
-          <motion.div
-            className="text-xs bg-white border border-purple-200 rounded-lg overflow-hidden nowheel shadow-lg"
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            onMouseDown={handleInteractionEvent}
-          >
+        <AnimatePresence>
+          {filteredData && (
             <motion.div
-              className="bg-gradient-to-r from-purple-50 to-pink-50 p-3 cursor-pointer hover:from-purple-100 hover:to-pink-100 transition-all duration-300"
-              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-xs bg-white border border-indigo-200 rounded-lg overflow-hidden shadow-lg nowheel"
+              initial={{ opacity: 0, scale: 0.8, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
               onMouseDown={handleInteractionEvent}
-              variants={buttonVariants}
-              whileHover="hover"
-              whileTap="tap"
             >
-              <div className="flex items-center justify-between">
-                <motion.div className="font-medium text-purple-800">
-                  ✅ Filtered Results
-                </motion.div>
-                <motion.span
-                  animate={{ rotate: isExpanded ? 180 : 0 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                  className="text-purple-600"
-                >
-                  ▼
-                </motion.span>
-              </div>
-              <motion.div className="text-purple-700 text-xs mt-1">
-                {filteredData.originalCount} → {filteredData.filteredCount} items
-              </motion.div>
-            </motion.div>
-
-            {isExpanded && (
               <motion.div
-                className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                transition={{ duration: 0.3 }}
-                onMouseDown={handleInteractionEvent}
+                className="bg-gradient-to-r from-indigo-50 to-blue-50 p-3 cursor-pointer hover:from-indigo-100 hover:to-blue-100 transition-all duration-300 nodrag"
+                onClick={() => setIsExpanded(!isExpanded)}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
               >
-                {filteredData.contents.slice(0, 20).map((item) => (
-                  <motion.div
-                    key={`result-${item.path}`}
-                    className="flex items-center space-x-2 py-1 hover:bg-purple-50 rounded transition-colors"
-                    whileHover={{ scale: 1.01, x: 2 }}
+                <div className="flex items-center justify-between">
+                  <div className="font-medium text-indigo-800">
+                    ✅ Filtered Results
+                  </div>
+                  <motion.span
+                    animate={{ rotate: isExpanded ? 180 : 0 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                    className="text-indigo-600"
                   >
-                    <span className="text-sm">
-                      {item.type === 'folder' ? '📁' : (knownFormats.get(item.name.split('.').pop()?.toLowerCase())?.icon || '📄')}
-                    </span>
-                    <span className="text-xs text-gray-700 flex-1">{item.name}</span>
-                  </motion.div>
-                ))}
-                {filteredData.contents.length > 20 && (
+                    ▼
+                  </motion.span>
+                </div>
+                <div className="text-indigo-700 text-xs mt-1">
+                  {filteredData.originalCount} → {filteredData.filteredCount} items
+                </div>
+              </motion.div>
+
+              <AnimatePresence>
+                {isExpanded && (
                   <motion.div
-                    className="text-xs text-gray-500 text-center py-2"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
+                    className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                    onMouseDown={handleInteractionEvent}
                   >
-                    ...and {filteredData.contents.length - 20} more items ✨
+                    {filteredData.contents.slice(0, 20).map((item) => (
+                      <motion.div
+                        key={`result-${item.path}`}
+                        className="flex items-center space-x-2 py-1 hover:bg-indigo-50 rounded transition-colors"
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        whileHover={{ scale: 1.01, x: 4 }}
+                      >
+                        <span className="text-sm">
+                          {item.type === 'folder' ? '📁' : (knownFormats.get(item.name.split('.').pop()?.toLowerCase())?.icon || '📄')}
+                        </span>
+                        <span className="text-xs text-indigo-700 flex-1 truncate">{item.name}</span>
+                      </motion.div>
+                    ))}
+                    {filteredData.contents.length > 20 && (
+                      <div className="text-xs text-indigo-500 text-center py-2">
+                        ...and {filteredData.contents.length - 20} more items
+                      </div>
+                    )}
                   </motion.div>
                 )}
-              </motion.div>
-            )}
-          </motion.div>
-        )}
-      </motion.div>
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
+      {/* **FIXED: Output Handle - Made larger and more visible** */}
       <Handle
         type="source"
         position={Position.Right}
         id="output"
-        style={{ 
+        style={{
           background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-          width: '12px',
-          height: '12px',
-          border: '2px solid white',
-          boxShadow: '0 0 10px rgba(16, 185, 129, 0.5)'
+          width: '16px',
+          height: '16px',
+          border: '3px solid white',
+          borderRadius: '50%',
+          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
+          right: '-8px'
         }}
         isConnectable={isConnectable}
       />
