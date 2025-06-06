@@ -6,3 +6,4 @@ export { default as ParseNode } from './ParseNode';
 export { default as ChunkNode } from './ChunkNode';
 export { default as APIConfigNode } from './APIConfigNode';    // ADD THIS
 export { default as VectorizeNode } from './VectorizeNode';
+export { default as ChatNode } from './ChatNode';

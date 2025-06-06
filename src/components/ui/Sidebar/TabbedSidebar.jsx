@@ -310,6 +310,13 @@ const ProcessingTab = () => {
       icon: '🔮',
       color: 'bg-gradient-to-r from-purple-50 to-violet-50 border-purple-200 text-purple-800',
       description: 'Generate vector embeddings for semantic search'
+    },
+    {
+      type: 'chatnode',
+      label: 'RAG Chat Query',
+      icon: '💬',
+      color: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-green-800',
+      description: 'Query your knowledge base with intelligent conversation'
     }
   ];
 
