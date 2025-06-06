@@ -94,7 +94,7 @@ const ControlTab = () => {
 
   const controlNodes = [
     {
-      type: 'executeNode',
+      type: 'execute',
       label: 'Execute Node',
       icon: '▶️',
       color: 'bg-gradient-to-r from-purple-50 to-violet-50 border-purple-200 text-purple-800',
@@ -189,14 +189,14 @@ const DataSourcesTab = () => {
       description: 'Configure API credentials for LLM services'
     },
     {
-      type: 'gitNode',
+      type: 'git',
       label: 'Git Repository',
       icon: '🐙',
       color: 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 text-amber-800',
       description: 'Fetch repository contents from GitHub/GitLab'
     },
     {
-      type: 'textNode',
+      type: 'text',
       label: 'Text Input',
       icon: '📝',
       color: 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-200 text-blue-800',
@@ -284,21 +284,21 @@ const ProcessingTab = () => {
 
   const processingNodes = [
     {
-      type: 'filterNode',
+      type: 'filter',
       label: 'Smart Filter',
       icon: '🔍',
       color: 'bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200 text-indigo-800',
       description: 'Filter repository files and folders intelligently'
     },
     {
-      type: 'parseNode',
+      type: 'parsenode',
       label: 'File Parser',
       icon: '🔧',
       color: 'bg-gradient-to-r from-slate-50 to-stone-50 border-slate-200 text-slate-800',
       description: 'Parse and extract content from various file formats'
     },
     {
-      type: 'chunkNode',
+      type: 'chunknode',
       label: 'Universal Chunker',
       icon: '🧩',
       color: 'bg-gradient-to-r from-rose-50 to-pink-50 border-rose-200 text-rose-800',
