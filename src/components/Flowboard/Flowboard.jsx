@@ -17,7 +17,7 @@ import {
 import { useNodeOperations } from '../../hooks/useNodeOperations';
 import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG } from '../../constants/flowconfig';
 import { useDnD } from '../../contexts/DnDContext';
-import { ExecuteNode, TextNode, GitNode, FilterNode, ParseNode, ChunkNode } from '../nodes'; // Using the new export structure
+import { ExecuteNode, TextNode, GitNode, FilterNode, ParseNode, ChunkNode, APIConfigNode, VectorizeNode } from '../nodes'; // Using the new export structure
 import ConsoleWindow from '../ui/Console';
 import '@xyflow/react/dist/style.css';
 
@@ -261,6 +261,8 @@ const nodeTypes = {
   filter: FilterNode,
   parsenode: ParseNode,
   chunknode: ChunkNode,
+  apinode: APIConfigNode,
+  vectorizenode: VectorizeNode,
 };
 
 const edgeTypes = {

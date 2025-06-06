@@ -32,14 +32,16 @@ const OverviewTab = () => (
       initial="hidden"
       animate="visible"
     >
-      <h4 className="font-medium text-gray-800">RAG Pipeline Workflow</h4>
+      <h4 className="font-medium text-gray-800">Complete RAG Pipeline Workflow</h4>
       <div className="space-y-2 text-sm text-gray-600">
         {[
           'Start with Execute Node to trigger the workflow',
+          'Configure API credentials with API Config Node',
           'Use Git Node to fetch repository data',
           'Apply Filter Node to select relevant files',
           'Parse files with Parse Node for content extraction',
-          'Chunk content with Chunk Node for RAG processing'
+          'Chunk content with Chunk Node for RAG processing',
+          'Generate embeddings with Vectorize Node for semantic search'
         ].map((step, index) => (
           <motion.div
             key={index}
@@ -65,10 +67,11 @@ const OverviewTab = () => (
     >
       <h4 className="font-medium text-amber-800 mb-2">💡 Pro Tips</h4>
       <ul className="text-xs text-amber-700 space-y-1">
-        <li>• Connect nodes in sequence for chain reaction execution</li>
+        <li>• Connect API Config Node to multiple processing nodes</li>
         <li>• Use the floating console to monitor workflow progress</li>
         <li>• Enable "Parse All Files" for comprehensive processing</li>
         <li>• Adjust chunk sizes based on your LLM context window</li>
+        <li>• Test API connections before running vectorization</li>
       </ul>
     </motion.div>
   </motion.div>
@@ -179,6 +182,13 @@ const DataSourcesTab = () => {
 
   const dataSourceNodes = [
     {
+      type: 'apinode',
+      label: 'API Configuration',
+      icon: '🔑',
+      color: 'bg-gradient-to-r from-cyan-50 to-teal-50 border-cyan-200 text-cyan-800',
+      description: 'Configure API credentials for LLM services'
+    },
+    {
       type: 'gitNode',
       label: 'Git Repository',
       icon: '🐙',
@@ -209,7 +219,7 @@ const DataSourcesTab = () => {
       >
         <h3 className="text-lg font-semibold text-amber-800 mb-2">📊 Data Sources</h3>
         <p className="text-sm text-amber-600">
-          Nodes that provide input data for your workflow
+          Nodes that provide input data and configuration for your workflow
         </p>
       </motion.div>
 
@@ -293,6 +303,13 @@ const ProcessingTab = () => {
       icon: '🧩',
       color: 'bg-gradient-to-r from-rose-50 to-pink-50 border-rose-200 text-rose-800',
       description: 'Chunk content for RAG and LLM processing'
+    },
+    {
+      type: 'vectorizenode',
+      label: 'Vector Embeddings',
+      icon: '🔮',
+      color: 'bg-gradient-to-r from-purple-50 to-violet-50 border-purple-200 text-purple-800',
+      description: 'Generate vector embeddings for semantic search'
     }
   ];
 
@@ -311,7 +328,7 @@ const ProcessingTab = () => {
       >
         <h3 className="text-lg font-semibold text-green-800 mb-2">⚙️ Processing Nodes</h3>
         <p className="text-sm text-green-600">
-          Nodes that transform and process your data
+          Nodes that transform and process your data for RAG
         </p>
       </motion.div>
 
@@ -541,7 +558,7 @@ const TabbedSidebar = () => {
             <motion.div
               className="absolute inset-0 rounded-2xl pointer-events-none"
               animate={{
-                boxShadow: isVisiblegit
+                boxShadow: isVisible
                   ? "0 0 30px rgba(59, 130, 246, 0.1)"
                   : "0 0 0px rgba(59, 130, 246, 0)"
               }}
