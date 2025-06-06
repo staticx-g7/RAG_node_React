@@ -65,6 +65,11 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState(new Set());
 
+  // **NEW: Branch-related state**
+  const [branches, setBranches] = useState(data?.branches || []);
+  const [selectedBranch, setSelectedBranch] = useState(data?.selectedBranch || '');
+  const [isFetchingBranches, setIsFetchingBranches] = useState(false);
+
   const { setNodes, getNodes, getEdges } = useReactFlow();
   const nodeRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -132,7 +137,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
     e.stopPropagation();
   }, []);
 
-  // **DEBOUNCED NODE DATA UPDATE**
+  // **DEBOUNCED NODE DATA UPDATE** - Enhanced with branch data
   useEffect(() => {
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
@@ -151,6 +156,8 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
                 repoUrl,
                 customEndpoint,
                 repoData,
+                branches,
+                selectedBranch,
                 lastUpdated: new Date().toISOString()
               }
             };
@@ -165,7 +172,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
         clearTimeout(updateTimeoutRef.current);
       }
     };
-  }, [platform, apiKey, repoUrl, customEndpoint, repoData, id, setNodes]);
+  }, [platform, apiKey, repoUrl, customEndpoint, repoData, branches, selectedBranch, id, setNodes]);
 
   const parseRepoUrl = useCallback((url) => {
     try {
@@ -191,6 +198,85 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
     }
   }, [customEndpoint, platform]);
 
+  // **NEW: Fetch Branches Function**
+  const fetchBranches = useCallback(async () => {
+    if (!apiKey || !repoUrl || isFetchingBranches) {
+      return;
+    }
+
+    const parsedRepo = parseRepoUrl(repoUrl);
+    if (!parsedRepo) {
+      setError('Invalid repository URL format');
+      return;
+    }
+
+    const endpoint = getApiEndpoint();
+    setIsFetchingBranches(true);
+    setError(null);
+
+    try {
+      console.log(`🌿 GitNode ${id}: Fetching branches for ${repoUrl}`);
+
+      let branchData = [];
+      if (platform === 'github') {
+        const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/branches?per_page=100`;
+        const headers = {
+          'Authorization': `token ${apiKey}`,
+          'Accept': 'application/vnd.github.v3+json'
+        };
+
+        const response = await fetch(apiUrl, { headers });
+        if (!response.ok) {
+          throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        branchData = data.map(branch => ({
+          name: branch.name,
+          isDefault: branch.name === 'main' || branch.name === 'master',
+          commit: branch.commit.sha,
+          protected: branch.protected || false
+        }));
+
+      } else {
+        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/branches?per_page=100`;
+        const headers = {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        };
+
+        const response = await fetch(apiUrl, { headers });
+        if (!response.ok) {
+          throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        branchData = data.map(branch => ({
+          name: branch.name,
+          isDefault: branch.default || false,
+          commit: branch.commit.id,
+          protected: branch.protected || false
+        }));
+      }
+
+      console.log(`✅ GitNode ${id}: Found ${branchData.length} branches`);
+      setBranches(branchData);
+
+      // Auto-select default branch
+      const defaultBranch = branchData.find(b => b.isDefault) || branchData[0];
+      if (defaultBranch && !selectedBranch) {
+        setSelectedBranch(defaultBranch.name);
+      }
+
+    } catch (err) {
+      console.error(`❌ GitNode ${id}: Branch fetch failed:`, err);
+      setError(`Failed to fetch branches: ${err.message}`);
+    } finally {
+      setIsFetchingBranches(false);
+    }
+  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isFetchingBranches, id, selectedBranch]);
+
+  // **ENHANCED: Fetch Repository Contents with Branch Support**
   const fetchRepoContents = useCallback(async () => {
     if (!apiKey || !repoUrl || isLoading) {
       console.log(`⚠️ GitNode ${id}: Cannot fetch - missing data or already loading`);
@@ -221,7 +307,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
     setError(null);
 
     try {
-      console.log(`🔍 GitNode ${id}: Starting repository fetch for ${repoUrl}`);
+      console.log(`🔍 GitNode ${id}: Starting repository fetch for ${repoUrl} (branch: ${selectedBranch || 'default'})`);
 
       let allContents = [];
       if (platform === 'github') {
@@ -230,7 +316,9 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
           if (fetchedPaths.has(dirPath)) return;
           fetchedPaths.add(dirPath);
           const pathParam = dirPath ? `/${dirPath}` : '';
-          const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}`;
+          // **NEW: Add branch parameter if selected**
+          const branchParam = selectedBranch ? `?ref=${selectedBranch}` : '';
+          const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}${branchParam}`;
           const headers = {
             'Authorization': `token ${apiKey}`,
             'Accept': 'application/vnd.github.v3+json'
@@ -255,7 +343,8 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
               path: item.path,
               size: item.size || 0,
               url: item.download_url || item.html_url,
-              depth: (item.path.match(/\//g) || []).length
+              depth: (item.path.match(/\//g) || []).length,
+              branch: selectedBranch || 'default'
             };
             allContents.push(formattedItem);
             if (item.type === 'dir') {
@@ -265,7 +354,9 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
         };
         await fetchDirectory();
       } else {
-        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000`;
+        // **NEW: GitLab with branch support**
+        const branchParam = selectedBranch ? `&ref=${selectedBranch}` : '';
+        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000${branchParam}`;
         const headers = {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
@@ -289,7 +380,8 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
           path: item.path,
           size: 0,
           url: item.web_url,
-          depth: (item.path.match(/\//g) || []).length
+          depth: (item.path.match(/\//g) || []).length,
+          branch: selectedBranch || 'default'
         }));
       }
 
@@ -298,13 +390,15 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
         repo: parsedRepo.repo,
         platform,
         endpoint,
+        selectedBranch: selectedBranch || 'default',
+        branches: branches,
         contents: allContents,
         fetchedAt: new Date().toISOString(),
         totalFiles: allContents.filter(item => item.type === 'file').length,
         totalFolders: allContents.filter(item => item.type === 'folder').length
       };
 
-      console.log(`✅ GitNode ${id}: Successfully fetched ${allContents.length} items`);
+      console.log(`✅ GitNode ${id}: Successfully fetched ${allContents.length} items from branch: ${selectedBranch || 'default'}`);
       setRepoData(result);
 
       // **TRIGGER NEXT NODES**
@@ -320,7 +414,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isLoading, id, triggerNextNodes]);
+  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isLoading, id, triggerNextNodes, selectedBranch, branches]);
 
   const handleNodeExecution = useCallback(async (inputData) => {
     console.log(`🎯 GitNode ${id}: Executing with input data:`, inputData);
@@ -395,7 +489,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
       className={`relative w-80 bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 border-2 border-amber-200 rounded-xl shadow-lg group nowheel overflow-visible ${
         selected ? 'ring-2 ring-amber-300' : ''
       }`}
-      style={{ minHeight: '500px' }}
+      style={{ minHeight: '600px' }}
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -479,8 +573,8 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
             className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
             whileFocus={{ scale: 1.01 }}
           >
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
+            <option value="github">🐙 GitHub</option>
+            <option value="gitlab">🦊 GitLab</option>
           </motion.select>
         </div>
 
@@ -494,8 +588,6 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
             value={repoUrl}
             onChange={(e) => setRepoUrl(e.target.value)}
             onKeyDown={handleKeyDown}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
             placeholder="https://github.com/owner/repo"
             className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
             whileFocus={{ scale: 1.01 }}
@@ -529,17 +621,62 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
           </div>
         </div>
 
-        {/* Advanced Settings Toggle */}
+        {/* **NEW: Branch Selection Section** */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-amber-700">
+              🌿 Branch Selection
+            </label>
+            <motion.button
+              onClick={fetchBranches}
+              disabled={isFetchingBranches || !apiKey || !repoUrl}
+              className="text-xs bg-amber-200 hover:bg-amber-300 px-2 py-1 rounded transition-colors nodrag disabled:opacity-50 disabled:cursor-not-allowed"
+              whileHover={{ scale: isFetchingBranches || !apiKey || !repoUrl ? 1 : 1.05 }}
+              whileTap={{ scale: isFetchingBranches || !apiKey || !repoUrl ? 1 : 0.95 }}
+            >
+              {isFetchingBranches ? '🔄' : '🌿'} {isFetchingBranches ? 'Fetching...' : 'Fetch Branches'}
+            </motion.button>
+          </div>
+
+          {branches.length > 0 ? (
+            <motion.select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
+              whileFocus={{ scale: 1.01 }}
+            >
+              {branches.map(branch => (
+                <option key={branch.name} value={branch.name}>
+                  {branch.name} {branch.isDefault ? '(default)' : ''} {branch.protected ? '🔒' : ''}
+                </option>
+              ))}
+            </motion.select>
+          ) : (
+            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+              {apiKey && repoUrl ? 'Click "Fetch Branches" to load available branches' : 'Enter API key and repository URL first'}
+            </div>
+          )}
+
+          {selectedBranch && (
+            <div className="text-xs text-amber-600 mt-1">
+              Selected: <strong>{selectedBranch}</strong>
+              {branches.find(b => b.name === selectedBranch)?.isDefault && ' (default branch)'}
+            </div>
+          )}
+        </div>
+
+        {/* Advanced Settings */}
         <div className="mb-4">
           <motion.button
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center space-x-2 text-xs text-amber-700 hover:text-amber-800 transition-colors nodrag"
+            className="text-xs text-amber-600 hover:text-amber-800 flex items-center space-x-1 nodrag"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
             <motion.span
               animate={{ rotate: showAdvanced ? 90 : 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+              transition={{ duration: 0.2 }}
             >
               ▶
             </motion.span>
@@ -549,21 +686,21 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
           <AnimatePresence>
             {showAdvanced && (
               <motion.div
-                className="mt-2"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.3 }}
+                className="mt-2"
               >
                 <label className="text-xs font-medium text-amber-700 mb-2 block">
-                  🌐 Custom Endpoint (Optional)
+                  🔧 Custom API Endpoint
                 </label>
                 <motion.input
                   type="text"
                   value={customEndpoint}
                   onChange={(e) => setCustomEndpoint(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="https://api.custom-git.com"
+                  placeholder="https://api.github.com (leave empty for default)"
                   className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
                   whileFocus={{ scale: 1.01 }}
                 />
@@ -572,11 +709,10 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
           </AnimatePresence>
         </div>
 
-        {/* Fetch Button */}
+        {/* Fetch Repository Button */}
         <motion.button
           ref={fetchButtonRef}
           onClick={fetchRepoContents}
-          onMouseDown={handleInteractionEvent}
           disabled={isLoading || !apiKey || !repoUrl}
           className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
             isLoading || !apiKey || !repoUrl
@@ -617,7 +753,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
                 : 'bg-amber-50 text-amber-600 border border-amber-200'
             }`}
           >
-            {repoData ? '✅ Repository Data Ready' : '⏸️ Ready to Fetch'}
+            {repoData ? '✅ Repository Loaded' : '⏸️ Ready to Fetch'}
           </div>
         </div>
 
@@ -655,7 +791,7 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
               >
                 <div className="flex items-center justify-between">
                   <div className="font-medium text-amber-800">
-                    📁 {repoData.owner}/{repoData.repo}
+                    ✅ Repository Fetched
                   </div>
                   <motion.span
                     animate={{ rotate: isExpanded ? 180 : 0 }}
@@ -667,44 +803,76 @@ const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
                 </div>
                 <div className="text-amber-700 text-xs mt-1">
                   {repoData.totalFiles} files, {repoData.totalFolders} folders
+                  {repoData.selectedBranch && ` (${repoData.selectedBranch})`}
                 </div>
               </motion.div>
 
               <AnimatePresence>
                 {isExpanded && (
                   <motion.div
-                    className="max-h-64 overflow-y-auto bg-white p-2 nowheel"
+                    className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.3 }}
                     onMouseDown={handleInteractionEvent}
                   >
-                    {repoData.contents.slice(0, 20).map((item, index) => (
-                      <motion.div
-                        key={index}
-                        className="flex items-center space-x-2 py-1 hover:bg-amber-50 rounded transition-colors"
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.02 }}
-                        whileHover={{ scale: 1.01, x: 4 }}
-                      >
-                        <span className="text-sm">
-                          {item.type === 'folder' ? '📁' : '📄'}
-                        </span>
-                        <span className="text-xs text-amber-700 flex-1 truncate">{item.name}</span>
-                        {item.size > 0 && (
-                          <span className="text-xs text-amber-500 bg-amber-100 px-1 rounded">
-                            {(item.size / 1024).toFixed(1)}KB
-                          </span>
-                        )}
-                      </motion.div>
-                    ))}
-                    {repoData.contents.length > 20 && (
-                      <div className="text-xs text-amber-500 text-center py-2">
-                        ...and {repoData.contents.length - 20} more items
+                    {/* Repository Info */}
+                    <div className="mb-3">
+                      <div className="font-medium text-amber-700 mb-1">📊 Repository Info</div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-amber-600">Owner:</span>
+                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.owner}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-600">Repository:</span>
+                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.repo}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-600">Platform:</span>
+                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.platform}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-600">Branch:</span>
+                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.selectedBranch}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-600">Total branches:</span>
+                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.branches?.length || 0}</span>
+                        </div>
                       </div>
-                    )}
+                    </div>
+
+                    {/* File Tree Preview */}
+                    <div>
+                      <div className="font-medium text-amber-700 mb-1">📁 Contents Preview</div>
+                      {repoData.contents.slice(0, 15).map((item, index) => (
+                        <motion.div
+                          key={index}
+                          className="flex items-center space-x-2 py-1 hover:bg-amber-50 rounded transition-colors"
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.02 }}
+                          whileHover={{ scale: 1.01, x: 4 }}
+                        >
+                          <span className="text-sm">
+                            {item.type === 'folder' ? '📁' : '📄'}
+                          </span>
+                          <span className="text-xs text-amber-700 flex-1 truncate">{item.name}</span>
+                          {item.size > 0 && (
+                            <span className="text-xs text-amber-500 bg-amber-100 px-1 rounded">
+                              {(item.size / 1024).toFixed(1)}KB
+                            </span>
+                          )}
+                        </motion.div>
+                      ))}
+                      {repoData.contents.length > 15 && (
+                        <div className="text-xs text-amber-500 text-center py-1">
+                          ...and {repoData.contents.length - 15} more items
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>

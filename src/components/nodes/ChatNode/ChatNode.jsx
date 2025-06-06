@@ -38,21 +38,26 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
   const [vectorizedData, setVectorizedData] = useState([]);
   const [textInput, setTextInput] = useState(data?.textInput || '');
   const [chatResponse, setChatResponse] = useState(null);
+  const [conversation, setConversation] = useState(data?.conversation || []); // **NEW: Conversation history**
+  const [currentInput, setCurrentInput] = useState(''); // **NEW: Current follow-up input**
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showChat, setShowChat] = useState(false); // **NEW: Toggle chat interface**
   const [dataCheckCounter, setDataCheckCounter] = useState(0);
 
   // Chat configuration
   const [selectedModel, setSelectedModel] = useState(data?.selectedModel || '');
   const [topK, setTopK] = useState(data?.topK || 5);
-  const [similarityThreshold, setSimilarityThreshold] = useState(data?.similarityThreshold || 0.7);
+  const [similarityThreshold, setSimilarityThreshold] = useState(data?.similarityThreshold || 0.4); // **CHANGED: Default to 0.4**
   const [temperature, setTemperature] = useState(data?.temperature || 0.7);
   const [maxTokens, setMaxTokens] = useState(data?.maxTokens || 1000);
   const [systemPrompt, setSystemPrompt] = useState(data?.systemPrompt || 'You are a helpful assistant. Answer questions based on the provided context.');
 
   const { setNodes, getNodes, getEdges } = useReactFlow();
   const chatButtonRef = useRef(null);
+  const chatContainerRef = useRef(null); // **NEW: Chat scroll container**
+  const inputRef = useRef(null); // **NEW: Chat input ref**
   const updateTimeoutRef = useRef(null);
 
   // **CHAIN REACTION FUNCTIONALITY**
@@ -116,7 +121,6 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
     }
 
     try {
-      // Use the same embedding model as vectorization for consistency
       const embeddingModel = apiConfig.availableModels?.find(model =>
         model.id.includes('embedding') ||
         model.id.includes('embed') ||
@@ -150,11 +154,10 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
     }
   }, [apiConfig, id]);
 
-  // Add this function to your ChatNode
+  // **ADAPTIVE SIMILARITY SEARCH**
   const adaptiveSimilaritySearch = useCallback(async (queryEmbedding) => {
     const allChunks = [];
 
-    // Collect all chunks
     vectorizedData.forEach(vectorData => {
       if (vectorData.vectorizedFiles) {
         vectorData.vectorizedFiles.forEach(file => {
@@ -174,7 +177,6 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
       }
     });
 
-    // Calculate all similarities
     const similarities = allChunks.map(chunk => {
       const similarity = calculateCosineSimilarity(queryEmbedding, chunk.embedding);
       return { ...chunk, similarity };
@@ -184,23 +186,15 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
       similarities.slice(0, 5).map(s => s.similarity.toFixed(3))
     );
 
-    // **AUTO-DETECT OPTIMAL THRESHOLD**
+    // Auto-detect optimal threshold
     const topSimilarity = similarities[0]?.similarity || 0;
-    const adaptiveThreshold = Math.max(
-      topSimilarity * 0.7,  // 70% of best match
-      0.2                   // Minimum threshold
-    );
-
-    console.log(`🎯 ChatNode ${id}: Auto-detected threshold: ${adaptiveThreshold.toFixed(3)} (original: ${similarityThreshold})`);
-
-    // Use adaptive threshold if it's lower than user setting
+    const adaptiveThreshold = Math.max(topSimilarity * 0.7, 0.2);
     const effectiveThreshold = Math.min(similarityThreshold, adaptiveThreshold);
 
     const topChunks = similarities
       .slice(0, topK)
       .filter(chunk => chunk.similarity >= effectiveThreshold);
 
-    // **FALLBACK: Always return at least one result if available**
     if (topChunks.length === 0 && similarities.length > 0) {
       console.log(`⚠️ ChatNode ${id}: No chunks above threshold, using best match`);
       topChunks.push(similarities[0]);
@@ -211,14 +205,13 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
     return topChunks;
   }, [vectorizedData, topK, similarityThreshold, calculateCosineSimilarity, id]);
 
-  // Add this auto-configuration based on content analysis
+  // **AUTO-CONFIGURE SETTINGS**
   const autoConfigureSettings = useCallback(() => {
     if (vectorizedData.length === 0) return;
 
     let totalChunks = 0;
     let hasCodeContent = false;
     let hasDocumentation = false;
-    let avgChunkSize = 0;
 
     vectorizedData.forEach(vectorData => {
       if (vectorData.vectorizedFiles) {
@@ -226,113 +219,88 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
           if (file.chunks) {
             totalChunks += file.chunks.length;
 
-            // Detect content types
             if (file.parser === 'code' || file.originalFile.name.match(/\.(js|py|java|cpp|ts)$/)) {
               hasCodeContent = true;
             }
             if (file.parser === 'markdown' || file.originalFile.name.match(/\.(md|txt|rst)$/)) {
               hasDocumentation = true;
             }
-
-            // Calculate average chunk size
-            file.chunks.forEach(chunk => {
-              avgChunkSize += chunk.content.length;
-            });
           }
         });
       }
     });
 
-    avgChunkSize = avgChunkSize / totalChunks;
-
-    // **AUTO-ADJUST SETTINGS BASED ON CONTENT**
-    let recommendedThreshold = 0.4; // Default
-    let recommendedTopK = 5;        // Default
+    let recommendedThreshold = 0.4;
+    let recommendedTopK = 5;
 
     if (hasCodeContent) {
-      recommendedThreshold = 0.3;    // Lower for code (more specific)
-      recommendedTopK = 3;           // Fewer results for code
+      recommendedThreshold = 0.3;
+      recommendedTopK = 3;
       console.log(`🤖 ChatNode ${id}: Detected code content, adjusting settings`);
     }
 
     if (hasDocumentation) {
-      recommendedThreshold = 0.5;    // Higher for docs (more general)
-      recommendedTopK = 7;           // More results for docs
+      recommendedThreshold = 0.5;
+      recommendedTopK = 7;
       console.log(`📚 ChatNode ${id}: Detected documentation, adjusting settings`);
     }
 
     if (totalChunks < 10) {
-      recommendedThreshold = 0.2;    // Very permissive for small datasets
+      recommendedThreshold = 0.2;
       console.log(`📊 ChatNode ${id}: Small dataset detected, lowering threshold`);
     }
 
-    // Auto-apply if user hasn't customized
-    if (similarityThreshold === 0.7) { // Default value
+    if (similarityThreshold === 0.7) {
       setSimilarityThreshold(recommendedThreshold);
     }
-    if (topK === 5) { // Default value
+    if (topK === 5) {
       setTopK(recommendedTopK);
     }
 
     console.log(`⚙️ ChatNode ${id}: Auto-configured - Threshold: ${recommendedThreshold}, TopK: ${recommendedTopK}`);
   }, [vectorizedData, similarityThreshold, topK, id]);
 
-  // Call auto-configuration when data changes
   useEffect(() => {
     autoConfigureSettings();
   }, [vectorizedData, autoConfigureSettings]);
 
-  // Add query analysis for better retrieval
-  const analyzeQuery = useCallback((query) => {
-    const isCodeQuery = /\b(function|class|method|variable|code|implementation|algorithm)\b/i.test(query);
-    const isExplanationQuery = /\b(what|how|why|explain|describe|tell me)\b/i.test(query);
-    const isSpecificQuery = query.length < 50;
-
-    let adjustedTopK = topK;
-    let adjustedThreshold = similarityThreshold;
-
-    if (isCodeQuery) {
-      adjustedTopK = Math.min(topK, 3);      // Fewer, more precise results
-      adjustedThreshold = Math.max(similarityThreshold, 0.4);
-    } else if (isExplanationQuery) {
-      adjustedTopK = Math.max(topK, 7);      // More context for explanations
-      adjustedThreshold = Math.min(similarityThreshold, 0.3);
-    }
-
-    console.log(`🔍 ChatNode ${id}: Query analysis - Code: ${isCodeQuery}, Explanation: ${isExplanationQuery}`);
-    console.log(`🎯 ChatNode ${id}: Adjusted settings - TopK: ${adjustedTopK}, Threshold: ${adjustedThreshold.toFixed(3)}`);
-
-    return { adjustedTopK, adjustedThreshold };
-  }, [topK, similarityThreshold, id]);
-
   // **RETRIEVE RELEVANT CHUNKS**
   const retrieveRelevantChunks = useCallback(async (queryEmbedding) => {
-  // Use adaptive similarity search instead of fixed threshold
-  return await adaptiveSimilaritySearch(queryEmbedding);
-}, [adaptiveSimilaritySearch]);
-  
-  // **GENERATE CHAT COMPLETION**
-  const generateChatCompletion = useCallback(async (query, relevantChunks) => {
+    return await adaptiveSimilaritySearch(queryEmbedding);
+  }, [adaptiveSimilaritySearch]);
+
+  // **GENERATE CHAT COMPLETION WITH CONVERSATION HISTORY** - **ENHANCED**
+  const generateChatCompletion = useCallback(async (query, relevantChunks, conversationHistory = []) => {
     if (!apiConfig || !apiConfig.apiKey || !selectedModel) {
       throw new Error('API configuration or model not selected');
     }
 
-    // Build context from relevant chunks
     const context = relevantChunks.map(chunk =>
       `Source: ${chunk.sourceFile}\n${chunk.content}`
     ).join('\n\n---\n\n');
 
-    // Build the prompt
+    // **NEW: Build conversation history for context**
     const messages = [
       {
         role: 'system',
-        content: systemPrompt
-      },
-      {
-        role: 'user',
-        content: `Context:\n${context}\n\nQuestion: ${query}\n\nPlease answer the question based on the provided context. If the context doesn't contain relevant information, say so.`
+        content: `${systemPrompt}\n\nContext:\n${context}`
       }
     ];
+
+    // **NEW: Add conversation history (last 6 messages)**
+    const recentHistory = conversationHistory.slice(-6);
+    recentHistory.forEach(msg => {
+      messages.push({
+        role: msg.role,
+        content: msg.content
+      });
+    });
+
+    // Add current query
+    messages.push({
+      role: 'user',
+      content: query
+    });
 
     try {
       const response = await fetch(`${apiConfig.apiEndpoint}/chat/completions`, {
@@ -369,8 +337,10 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
   }, [apiConfig, selectedModel, systemPrompt, temperature, maxTokens, id]);
 
   // **MAIN CHAT PROCESSING**
-  const processChatQuery = useCallback(async () => {
-    if (!textInput.trim()) {
+  const processChatQuery = useCallback(async (queryText = null, isFollowUp = false) => {
+    const query = queryText || textInput;
+
+    if (!query.trim()) {
       setError('Please enter a query');
       return;
     }
@@ -387,26 +357,30 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
 
     setIsProcessing(true);
     setError(null);
-    console.log(`🔄 ChatNode ${id}: Processing query: "${textInput}"`);
+    console.log(`🔄 ChatNode ${id}: Processing query: "${query}"`);
 
     try {
-      // Step 1: Generate query embedding
-      console.log(`🔮 ChatNode ${id}: Generating query embedding`);
-      const queryEmbedding = await generateQueryEmbedding(textInput);
+      // **NEW: Add user message to conversation if it's a follow-up**
+      if (isFollowUp) {
+        const userMessage = {
+          role: 'user',
+          content: query,
+          timestamp: new Date().toISOString()
+        };
+        setConversation(prev => [...prev, userMessage]);
+      }
 
-      // Step 2: Retrieve relevant chunks
-      console.log(`🔍 ChatNode ${id}: Retrieving relevant chunks`);
+      const queryEmbedding = await generateQueryEmbedding(query);
       const relevantChunks = await retrieveRelevantChunks(queryEmbedding);
 
       if (relevantChunks.length === 0) {
         throw new Error(`No relevant content found for query (threshold: ${similarityThreshold})`);
       }
 
-      // Step 3: Generate chat completion
-      console.log(`💬 ChatNode ${id}: Generating response with ${relevantChunks.length} chunks`);
-      const result = await generateChatCompletion(textInput, relevantChunks);
+      // **NEW: Pass conversation history for context**
+      const result = await generateChatCompletion(query, relevantChunks, conversation);
 
-      setChatResponse({
+      const responseData = {
         ...result,
         processedAt: new Date().toISOString(),
         config: {
@@ -416,23 +390,91 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
           maxTokens,
           systemPrompt
         }
-      });
+      };
+
+      if (isFollowUp) {
+        // **NEW: Add assistant response to conversation**
+        const assistantMessage = {
+          role: 'assistant',
+          content: result.response,
+          timestamp: new Date().toISOString(),
+          relevantChunks: result.relevantChunks,
+          usage: result.usage
+        };
+        setConversation(prev => [...prev, assistantMessage]);
+      } else {
+        // **NEW: Initialize conversation for first query**
+        setChatResponse(responseData);
+        const initialConversation = [
+          {
+            role: 'user',
+            content: query,
+            timestamp: responseData.processedAt
+          },
+          {
+            role: 'assistant',
+            content: result.response,
+            timestamp: responseData.processedAt,
+            relevantChunks: result.relevantChunks,
+            usage: result.usage
+          }
+        ];
+        setConversation(initialConversation);
+        setShowChat(true); // **NEW: Show chat interface after first response**
+      }
 
       console.log(`✅ ChatNode ${id}: Chat processing complete`);
 
-      // **TRIGGER NEXT NODES**
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await triggerNextNodes(id);
+      if (!isFollowUp) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await triggerNextNodes(id);
+      }
 
     } catch (error) {
       console.error(`❌ ChatNode ${id}: Chat processing failed:`, error);
       setError(`Chat processing failed: ${error.message}`);
+
+      if (isFollowUp) {
+        // **NEW: Add error message to conversation**
+        const errorMessage = {
+          role: 'assistant',
+          content: `Sorry, I encountered an error: ${error.message}`,
+          timestamp: new Date().toISOString(),
+          isError: true
+        };
+        setConversation(prev => [...prev, errorMessage]);
+      }
     } finally {
       setIsProcessing(false);
     }
-  }, [textInput, apiConfig, selectedModel, vectorizedData, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, generateQueryEmbedding, retrieveRelevantChunks, generateChatCompletion, triggerNextNodes]);
+  }, [textInput, apiConfig, selectedModel, vectorizedData, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, generateQueryEmbedding, retrieveRelevantChunks, generateChatCompletion, triggerNextNodes, conversation]);
 
-  // **DEBOUNCED NODE DATA UPDATE**
+  // **NEW: Handle follow-up questions**
+  const handleFollowUpQuestion = useCallback(async () => {
+    if (!currentInput.trim()) return;
+
+    const query = currentInput.trim();
+    setCurrentInput('');
+
+    await processChatQuery(query, true);
+  }, [currentInput, processChatQuery]);
+
+  // **NEW: Handle Enter key in chat input**
+  const handleKeyPress = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleFollowUpQuestion();
+    }
+  }, [handleFollowUpQuestion]);
+
+  // **NEW: Auto-scroll chat to bottom**
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [conversation]);
+
+  // **DEBOUNCED NODE DATA UPDATE** - **ENHANCED**
   useEffect(() => {
     if (updateTimeoutRef.current) {
       clearTimeout(updateTimeoutRef.current);
@@ -450,6 +492,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
                 vectorizedData,
                 textInput,
                 chatResponse,
+                conversation, // **NEW: Save conversation**
                 selectedModel,
                 topK,
                 similarityThreshold,
@@ -470,7 +513,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
         clearTimeout(updateTimeoutRef.current);
       }
     };
-  }, [apiConfig, vectorizedData, textInput, chatResponse, selectedModel, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, setNodes]);
+  }, [apiConfig, vectorizedData, textInput, chatResponse, conversation, selectedModel, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, setNodes]);
 
   // **ENHANCED DATA DETECTION - RECEIVES FROM MULTIPLE SOURCES**
   useEffect(() => {
@@ -487,7 +530,6 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
           const sourceNode = nodes.find(node => node.id === edge.source);
 
           if (sourceNode && sourceNode.data) {
-            // Check for API config from APIConfigNode
             if (sourceNode.data.apiKey && sourceNode.data.apiEndpoint) {
               console.log(`✅ ChatNode ${id}: Found API configuration`);
               setApiConfig({
@@ -496,7 +538,6 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
                 availableModels: sourceNode.data.availableModels || []
               });
 
-              // Auto-select first chat model if none selected
               if (!selectedModel && sourceNode.data.availableModels) {
                 const chatModels = sourceNode.data.availableModels.filter(model =>
                   model.id.includes('gpt') ||
@@ -511,26 +552,21 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
               }
             }
 
-            // Check for vectorized data from VectorizeNode(s)
             if (sourceNode.data.vectorizedData || sourceNode.data.vectorizedFiles) {
               console.log(`✅ ChatNode ${id}: Found vectorized data`);
               const vectorData = sourceNode.data.vectorizedData || sourceNode.data;
               setVectorizedData(prev => {
-                // Check if this source is already added
                 const existingIndex = prev.findIndex(item => item.sourceNodeId === edge.source);
                 if (existingIndex >= 0) {
-                  // Update existing source
                   const updated = [...prev];
                   updated[existingIndex] = { ...vectorData, sourceNodeId: edge.source };
                   return updated;
                 } else {
-                  // Add new source
                   return [...prev, { ...vectorData, sourceNodeId: edge.source }];
                 }
               });
             }
 
-            // Check for text input from TextNode
             if (sourceNode.data.text || sourceNode.data.content) {
               console.log(`✅ ChatNode ${id}: Found text input`);
               setTextInput(sourceNode.data.text || sourceNode.data.content);
@@ -648,30 +684,33 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
     );
   }, [apiConfig]);
 
-  // **CHAT STATISTICS**
+  // **CHAT STATISTICS** - **ENHANCED**
   const chatStats = useMemo(() => {
-    if (!chatResponse) return null;
+    if (!chatResponse && conversation.length === 0) return null;
 
     const totalSources = vectorizedData.length;
     const totalChunks = vectorizedData.reduce((sum, data) => {
       return sum + (data.vectorizedFiles?.reduce((fileSum, file) => fileSum + (file.chunks?.length || 0), 0) || 0);
     }, 0);
 
+    const relevantChunks = chatResponse?.relevantChunks?.length ||
+      conversation.filter(msg => msg.relevantChunks).reduce((sum, msg) => sum + msg.relevantChunks.length, 0);
+
     return {
       totalSources,
       totalChunks,
-      relevantChunks: chatResponse.relevantChunks?.length || 0,
-      model: chatResponse.model,
-      usage: chatResponse.usage
+      relevantChunks,
+      conversationLength: conversation.length,
+      model: chatResponse?.model || selectedModel
     };
-  }, [chatResponse, vectorizedData]);
+  }, [chatResponse, vectorizedData, conversation, selectedModel]);
 
   return (
     <motion.div
-      className={`relative w-96 bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 border-2 border-emerald-200 rounded-xl shadow-lg group nowheel overflow-visible ${
+      className={`relative w-[500px] bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 border-2 border-emerald-200 rounded-xl shadow-lg group nowheel overflow-visible ${
         selected ? 'ring-2 ring-emerald-300' : ''
       }`}
-      style={{ minHeight: '700px' }}
+      style={{ minHeight: showChat ? '800px' : '700px' }} // **NEW: Dynamic height**
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
@@ -769,13 +808,27 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
 
       <div className="p-4 pt-8 nowheel">
         {/* Header */}
-        <div className="flex items-center space-x-2 mb-4">
-          <FloatingIcon isProcessing={isProcessing}>
-            <span className="text-xl">💬</span>
-          </FloatingIcon>
-          <h3 className="text-sm font-semibold text-emerald-800">
-            RAG Chat Query
-          </h3>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <FloatingIcon isProcessing={isProcessing}>
+              <span className="text-xl">💬</span>
+            </FloatingIcon>
+            <h3 className="text-sm font-semibold text-emerald-800">
+              RAG Chat Interface
+            </h3>
+          </div>
+
+          {/* **NEW: Chat toggle button** */}
+          {conversation.length > 0 && (
+            <motion.button
+              onClick={() => setShowChat(!showChat)}
+              className="text-xs bg-emerald-200 hover:bg-emerald-300 px-2 py-1 rounded transition-colors nodrag"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {showChat ? '📖 Hide Chat' : '💬 Show Chat'}
+            </motion.button>
+          )}
         </div>
 
         {/* Connection Status */}
@@ -800,6 +853,114 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
             {vectorizedData.length > 0 ? `🔮 ${vectorizedData.length} Vector Source(s)` : '⏸️ Waiting for vectors'}
           </div>
         </div>
+
+        {/* **NEW: Chat Interface** */}
+        <AnimatePresence>
+          {showChat && conversation.length > 0 && (
+            <motion.div
+              className="mb-4 bg-white border border-emerald-200 rounded-lg shadow-sm overflow-hidden"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="bg-emerald-100 px-3 py-2 border-b border-emerald-200">
+                <div className="text-xs font-medium text-emerald-700">💬 Conversation ({conversation.length} messages)</div>
+              </div>
+
+              <div
+                ref={chatContainerRef}
+                className="h-64 overflow-y-auto p-3 space-y-3 nowheel"
+                onMouseDown={handleInteractionEvent}
+              >
+                {conversation.map((message, index) => (
+                  <motion.div
+                    key={index}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <div
+                      className={`max-w-[80%] p-2 rounded-lg text-xs ${
+                        message.role === 'user'
+                          ? 'bg-emerald-500 text-white'
+                          : message.isError
+                          ? 'bg-red-50 text-red-700 border border-red-200'
+                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                      {message.relevantChunks && message.relevantChunks.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-emerald-300 text-xs opacity-75">
+                          📄 Sources: {message.relevantChunks.map(chunk => chunk.sourceFile).join(', ')}
+                        </div>
+                      )}
+                      <div className="text-xs opacity-50 mt-1">
+                        {new Date(message.timestamp).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+
+                {isProcessing && (
+                  <motion.div
+                    className="flex justify-start"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                  >
+                    <div className="bg-emerald-50 text-emerald-600 p-2 rounded-lg text-xs border border-emerald-200">
+                      <motion.div
+                        className="flex space-x-1"
+                        animate={{ opacity: [0.5, 1, 0.5] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                      >
+                        <span>●</span>
+                        <span>●</span>
+                        <span>●</span>
+                      </motion.div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* **NEW: Chat Input Area** */}
+              <div className="border-t border-emerald-200 p-3">
+                <div className="flex space-x-2">
+                  <motion.textarea
+                    ref={inputRef}
+                    value={currentInput}
+                    onChange={(e) => setCurrentInput(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    onMouseDown={handleInteractionEvent}
+                    placeholder="Ask a follow-up question..."
+                    className="flex-1 p-2 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-emerald-800 nodrag resize-none"
+                    rows={2}
+                    disabled={isProcessing || !apiConfig || !selectedModel}
+                    whileFocus={{ scale: 1.01 }}
+                  />
+                  <motion.button
+                    onClick={handleFollowUpQuestion}
+                    onMouseDown={handleInteractionEvent}
+                    disabled={isProcessing || !currentInput.trim() || !apiConfig || !selectedModel}
+                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 nodrag ${
+                      isProcessing || !currentInput.trim() || !apiConfig || !selectedModel
+                        ? 'bg-emerald-200 text-emerald-500 cursor-not-allowed'
+                        : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm'
+                    }`}
+                    whileHover={{ scale: isProcessing || !currentInput.trim() || !apiConfig || !selectedModel ? 1 : 1.05 }}
+                    whileTap={{ scale: isProcessing || !currentInput.trim() || !apiConfig || !selectedModel ? 1 : 0.95 }}
+                  >
+                    {isProcessing ? '⏳' : '📤'}
+                  </motion.button>
+                </div>
+                <div className="text-xs text-emerald-500 mt-1">
+                  Press Enter to send • Shift+Enter for new line
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Model Selection */}
         {apiConfig && chatModels.length > 0 && (
@@ -944,7 +1105,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
         {/* Process Query Button */}
         <motion.button
           ref={chatButtonRef}
-          onClick={processChatQuery}
+          onClick={() => processChatQuery()}
           onMouseDown={handleInteractionEvent}
           disabled={isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0}
           className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
@@ -987,6 +1148,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
             <div>Vector sources: {vectorizedData.length}</div>
             <div>Selected model: {selectedModel || 'None'}</div>
             <div>Query length: {textInput.length} chars</div>
+            <div>Conversation messages: {conversation.length}</div>
           </div>
         )}
 
@@ -1007,7 +1169,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
 
         {/* Chat Results */}
         <AnimatePresence>
-          {chatResponse && chatStats && (
+          {chatStats && (
             <motion.div
               className="text-xs bg-white border border-emerald-200 rounded-lg overflow-hidden shadow-lg nowheel"
               initial={{ opacity: 0, scale: 0.8, y: 20 }}
@@ -1024,7 +1186,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
               >
                 <div className="flex items-center justify-between">
                   <div className="font-medium text-emerald-800">
-                    ✅ Query Processed
+                    ✅ Chat Active ({chatStats.conversationLength} messages)
                   </div>
                   <motion.span
                     animate={{ rotate: isExpanded ? 180 : 0 }}
@@ -1035,7 +1197,7 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
                   </motion.span>
                 </div>
                 <div className="text-emerald-700 text-xs mt-1">
-                  Found {chatStats.relevantChunks} relevant chunks from {chatStats.totalSources} sources
+                  {chatStats.relevantChunks} relevant chunks from {chatStats.totalSources} sources
                 </div>
               </motion.div>
 
@@ -1049,55 +1211,55 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
                     transition={{ duration: 0.3 }}
                     onMouseDown={handleInteractionEvent}
                   >
-                    {/* Query Statistics */}
+                    {/* Chat Statistics */}
                     <div className="mb-3">
-                      <div className="font-medium text-emerald-700 mb-1">📊 Query Statistics</div>
+                      <div className="font-medium text-emerald-700 mb-1">📊 Chat Statistics</div>
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between">
                           <span className="text-emerald-600">Model:</span>
                           <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.model}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-emerald-600">Relevant chunks:</span>
-                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.relevantChunks}</span>
+                          <span className="text-emerald-600">Messages:</span>
+                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.conversationLength}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-emerald-600">Total sources:</span>
                           <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.totalSources}</span>
                         </div>
-                        {chatStats.usage && (
-                          <div className="flex justify-between">
-                            <span className="text-emerald-600">Tokens used:</span>
-                            <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.usage.total_tokens}</span>
-                          </div>
-                        )}
+                        <div className="flex justify-between">
+                          <span className="text-emerald-600">Available chunks:</span>
+                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.totalChunks}</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Relevant Sources */}
+                    {/* Recent Sources */}
                     <div>
-                      <div className="font-medium text-emerald-700 mb-1">📄 Relevant Sources</div>
-                      {chatResponse.relevantChunks?.slice(0, 5).map((chunk, index) => (
-                        <motion.div
-                          key={index}
-                          className="flex items-center space-x-2 py-1 hover:bg-emerald-50 rounded transition-colors"
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.02 }}
-                          whileHover={{ scale: 1.01, x: 4 }}
-                        >
-                          <span className="text-sm">📄</span>
-                          <span className="text-xs text-emerald-700 flex-1 truncate">{chunk.sourceFile}</span>
-                          <span className="text-xs text-emerald-500 bg-emerald-100 px-1 rounded">
-                            {(chunk.similarity * 100).toFixed(1)}%
-                          </span>
-                        </motion.div>
-                      ))}
-                      {chatResponse.relevantChunks?.length > 5 && (
-                        <div className="text-xs text-emerald-500 text-center py-1">
-                          ...and {chatResponse.relevantChunks.length - 5} more sources
-                        </div>
-                      )}
+                      <div className="font-medium text-emerald-700 mb-1">📄 Recent Sources Used</div>
+                      {conversation
+                        .filter(msg => msg.relevantChunks && msg.relevantChunks.length > 0)
+                        .slice(-3)
+                        .map((msg, index) => (
+                          <div key={index} className="mb-2">
+                            <div className="text-xs text-emerald-600 font-medium">
+                              Query: {msg.content?.substring(0, 50)}...
+                            </div>
+                            {msg.relevantChunks.slice(0, 3).map((chunk, chunkIndex) => (
+                              <motion.div
+                                key={chunkIndex}
+                                className="flex items-center space-x-2 py-1 hover:bg-emerald-50 rounded transition-colors ml-2"
+                                whileHover={{ scale: 1.01, x: 4 }}
+                              >
+                                <span className="text-sm">📄</span>
+                                <span className="text-xs text-emerald-700 flex-1 truncate">{chunk.sourceFile}</span>
+                                <span className="text-xs text-emerald-500 bg-emerald-100 px-1 rounded">
+                                  {(chunk.similarity * 100).toFixed(1)}%
+                                </span>
+                              </motion.div>
+                            ))}
+                          </div>
+                        ))}
                     </div>
                   </motion.div>
                 )}
@@ -1107,24 +1269,25 @@ const ChatNode = ({ id, data, isConnectable, selected }) => {
         </AnimatePresence>
       </div>
 
-      {/* **FIXED: Output Handle** */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{
-          background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-          right: '-8px'
-        }}
-        isConnectable={isConnectable}
-      />
-    </motion.div>
-  );
-};
+            {/* **FIXED: Output Handle** */}
+            <Handle
+              type="source"
+              position={Position.Right}
+              id="output"
+              style={{
+                background: 'linear-gradient(45deg, #10b981, #3b82f6)',
+                width: '16px',
+                height: '16px',
+                border: '3px solid white',
+                borderRadius: '50%',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
+                right: '-8px'
+              }}
+              isConnectable={isConnectable}
+            />
+          </motion.div>
+        );
+      };
 
-export default ChatNode;
+      export default ChatNode;
+      
