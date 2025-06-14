@@ -1,1293 +1,790 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../../ui/PlayButton';
 
-// Simplified Background Beams
 const BackgroundBeams = ({ className }) => (
-  <div className={`absolute inset-0 pointer-events-none ${className}`}>
-    <svg className="absolute inset-0 h-full w-full opacity-20" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="chat-beams" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M0 40L40 0H20L0 20M40 40V20L20 40" stroke="rgba(156, 163, 175, 0.1)" fill="none" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#chat-beams)" />
-    </svg>
+  <div className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/20 via-green-50/20 to-teal-50/20" />
+    <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-emerald-200/30 to-transparent" />
+    <div className="absolute top-1/4 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-200/30 to-transparent" />
   </div>
 );
 
-// Floating icon animation
-const FloatingIcon = ({ children, isProcessing }) => (
-  <motion.div
-    animate={{
-      y: [0, -2, 0],
-      rotate: isProcessing ? 360 : 0,
-    }}
-    transition={{
-      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-      rotate: { duration: isProcessing ? 2 : 0, repeat: isProcessing ? Infinity : 0, ease: "linear" }
-    }}
-  >
-    {children}
-  </motion.div>
-);
+const ChatNode = ({ id, data, selected }) => {
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
 
-const ChatNode = ({ id, data, isConnectable, selected }) => {
-  const [apiConfig, setApiConfig] = useState(data?.apiConfig || null);
-  const [vectorizedData, setVectorizedData] = useState([]);
-  const [textInput, setTextInput] = useState(data?.textInput || '');
-  const [chatResponse, setChatResponse] = useState(null);
-  const [conversation, setConversation] = useState(data?.conversation || []); // **NEW: Conversation history**
-  const [currentInput, setCurrentInput] = useState(''); // **NEW: Current follow-up input**
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState(null);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [showChat, setShowChat] = useState(false); // **NEW: Toggle chat interface**
-  const [dataCheckCounter, setDataCheckCounter] = useState(0);
+  // State management
+  const [showSettings, setShowSettings] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [connectedApiConfig, setConnectedApiConfig] = useState(null);
+  const [connectedVectorData, setConnectedVectorData] = useState(null);
+  const [messages, setMessages] = useState(data.messages || []);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [isChatWindowOpen, setIsChatWindowOpen] = useState(false);
 
-  // Chat configuration
-  const [selectedModel, setSelectedModel] = useState(data?.selectedModel || '');
-  const [topK, setTopK] = useState(data?.topK || 5);
-  const [similarityThreshold, setSimilarityThreshold] = useState(data?.similarityThreshold || 0.4); // **CHANGED: Default to 0.4**
-  const [temperature, setTemperature] = useState(data?.temperature || 0.7);
-  const [maxTokens, setMaxTokens] = useState(data?.maxTokens || 1000);
-  const [systemPrompt, setSystemPrompt] = useState(data?.systemPrompt || 'You are a helpful assistant. Answer questions based on the provided context.');
+  // Chat settings
+  const [settings, setSettings] = useState({
+    model: data.model || '',
+    creativity: data.creativity || 0.7,
+    maxResponseLength: data.maxResponseLength || 2000, // Increased for better responses
+    useKnowledgeBase: data.useKnowledgeBase !== false,
+    knowledgeBaseContent: data.knowledgeBaseContent || '',
+    systemPrompt: data.systemPrompt || 'You are a helpful AI assistant with access to repository information. Use the provided context to answer questions accurately.',
+    contextWindow: data.contextWindow || 10,
+    streamResponse: data.streamResponse !== false,
+    autoOpenChat: data.autoOpenChat !== false,
+  });
 
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const chatButtonRef = useRef(null);
-  const chatContainerRef = useRef(null); // **NEW: Chat scroll container**
-  const inputRef = useRef(null); // **NEW: Chat input ref**
-  const updateTimeoutRef = useRef(null);
+  const [stats, setStats] = useState({
+    totalMessages: messages.length,
+    lastMessageTime: null,
+    tokensUsed: 0,
+    averageResponseTime: 0,
+    knowledgeBaseSize: 0,
+  });
 
-  // **CHAIN REACTION FUNCTIONALITY**
-  const triggerNextNodes = useCallback(async (currentNodeId) => {
+  // ENHANCED: Strict API config detection
+  const getApiConfig = useCallback(() => {
+    try {
+      const edges = getEdges();
+      const nodes = getNodes();
+
+      console.log('🔍 ChatNode searching for API config...');
+      console.log('📊 Current node ID:', id);
+      console.log('📊 Edges targeting this node:', edges.filter(e => e.target === id));
+
+      // Only look for direct connections to this specific node
+      const apiConfigEdge = edges.find(edge => {
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        return edge.target === id && sourceNode && sourceNode.type === 'apiConfigNode';
+      });
+
+      if (apiConfigEdge) {
+        console.log('✅ Found API config edge:', apiConfigEdge);
+        const apiConfigNode = nodes.find(node => node.id === apiConfigEdge.source);
+
+        if (apiConfigNode && apiConfigNode.type === 'apiConfigNode' && apiConfigNode.data) {
+          const config = {
+            provider: apiConfigNode.data.provider || 'custom',
+            endpoint: apiConfigNode.data.endpoint || '',
+            apiKey: apiConfigNode.data.apiKey || '',
+            token: apiConfigNode.data.token || '',
+            headers: apiConfigNode.data.headers || {},
+            isConnected: apiConfigNode.data.isConnected || false,
+            availableModels: apiConfigNode.data.availableModels || [],
+            chatModels: apiConfigNode.data.chatModels || [],
+          };
+
+          console.log('✅ Extracted config for Chat:', config);
+          setConnectedApiConfig(config);
+          return config;
+        }
+      }
+
+      console.log('❌ No API config found for ChatNode (strict mode)');
+      setConnectedApiConfig(null);
+      return {};
+    } catch (error) {
+      console.error('❌ Error getting API config:', error);
+      setConnectedApiConfig(null);
+      return {};
+    }
+  }, [id, getNodes, getEdges]);
+
+  // ENHANCED: Get vector data with comprehensive metadata extraction
+  const getVectorData = useCallback(() => {
+    try {
+      const edges = getEdges();
+      const nodes = getNodes();
+
+      console.log('🔍 ChatNode looking for vector data...');
+
+      const vectorEdge = edges.find(edge => {
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        return edge.target === id && sourceNode && sourceNode.type === 'vectorizeNode';
+      });
+
+      if (vectorEdge) {
+        const vectorNode = nodes.find(node => node.id === vectorEdge.source);
+
+        if (vectorNode && vectorNode.data) {
+          console.log('✅ Found vector node:', vectorNode.data);
+
+          const vectorData = {
+            vectors: vectorNode.data.vectorizationResults?.vectors || [],
+            metadata: vectorNode.data.vectorizationResults?.metadata || {},
+            stats: vectorNode.data.stats || {},
+            nodeType: vectorNode.type,
+            // ENHANCED: Extract comprehensive repository context
+            repositoryInfo: {
+              totalVectors: vectorNode.data.stats?.totalVectors || 0,
+              embeddingModel: vectorNode.data.vectorizationResults?.metadata?.model || 'unknown',
+              dimensions: vectorNode.data.vectorizationResults?.metadata?.dimensions || 0,
+              sourceNodeType: vectorNode.data.vectorizationResults?.metadata?.sourceNodeType || 'unknown'
+            }
+          };
+
+          // ENHANCED: Process and structure knowledge base content
+          if (vectorData.vectors.length > 0) {
+            const structuredKnowledge = vectorData.vectors.map((vector, index) => {
+              const metadata = vector.metadata || {};
+              return {
+                id: vector.id || `chunk_${index}`,
+                content: metadata.text || '',
+                filename: metadata.filename || metadata.path || metadata.source || `file_${index}`,
+                chunkIndex: metadata.chunk_index || index,
+                source: metadata.source || 'unknown',
+                textLength: metadata.text_length || 0,
+                embeddingModel: metadata.embedding_model || 'unknown'
+              };
+            }).filter(item => item.content.trim().length > 0);
+
+            // Create comprehensive knowledge base content
+            const knowledgeContent = structuredKnowledge
+              .map((item, index) => {
+                return `[${item.filename} - Chunk ${item.chunkIndex + 1}]\n${item.content}`;
+              })
+              .join('\n\n---\n\n');
+
+            console.log('📚 Processed knowledge base:', {
+              totalChunks: structuredKnowledge.length,
+              contentLength: knowledgeContent.length,
+              sampleFiles: structuredKnowledge.slice(0, 3).map(s => s.filename)
+            });
+
+            // Update settings with processed knowledge
+            if (settings.useKnowledgeBase && knowledgeContent) {
+              handleSettingChange('knowledgeBaseContent', knowledgeContent);
+              setStats(prev => ({
+                ...prev,
+                knowledgeBaseSize: knowledgeContent.length
+              }));
+            }
+
+            vectorData.structuredKnowledge = structuredKnowledge;
+            vectorData.processedContent = knowledgeContent;
+          }
+
+          setConnectedVectorData(vectorData);
+          return vectorData;
+        }
+      }
+
+      console.log('❌ No vector data found');
+      setConnectedVectorData(null);
+      return { vectors: [], metadata: {}, stats: {}, nodeType: null };
+    } catch (error) {
+      console.error('❌ Error getting vector data:', error);
+      setConnectedVectorData(null);
+      return { vectors: [], metadata: {}, stats: {}, nodeType: null };
+    }
+  }, [id, getNodes, getEdges, settings.useKnowledgeBase]);
+
+  // Monitor for API config and vector data changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      getApiConfig();
+      getVectorData();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [getApiConfig, getVectorData]);
+
+  // Extract available models with proper type checking
+  useEffect(() => {
+    if (connectedApiConfig && connectedApiConfig.chatModels && connectedApiConfig.chatModels.length > 0) {
+      setAvailableModels(connectedApiConfig.chatModels);
+
+      if (!settings.model && connectedApiConfig.chatModels.length > 0) {
+        handleSettingChange('model', connectedApiConfig.chatModels[0]);
+      }
+    } else if (connectedApiConfig && connectedApiConfig.availableModels && connectedApiConfig.availableModels.length > 0) {
+      // Filter out embedding models with proper type checking
+      const chatModels = connectedApiConfig.availableModels.filter(model => {
+        try {
+          if (typeof model !== 'string') {
+            const modelName = model?.id || model?.name || model?.model || '';
+            return typeof modelName === 'string' &&
+                   !modelName.toLowerCase().includes('embedding') &&
+                   !modelName.toLowerCase().includes('embed');
+          }
+
+          return !model.toLowerCase().includes('embedding') &&
+                 !model.toLowerCase().includes('embed');
+        } catch (error) {
+          console.warn('Error filtering model:', model, error);
+          return false;
+        }
+      }).map(model => {
+        try {
+          if (typeof model === 'string') {
+            return model;
+          }
+          return model?.id || model?.name || model?.model || 'Unknown Model';
+        } catch (error) {
+          console.warn('Error normalizing model:', model, error);
+          return 'Unknown Model';
+        }
+      }).filter(modelName => modelName !== 'Unknown Model');
+
+      setAvailableModels(chatModels);
+
+      if (!settings.model && chatModels.length > 0) {
+        handleSettingChange('model', chatModels[0]);
+      }
+    } else {
+      setAvailableModels([]);
+    }
+  }, [connectedApiConfig, settings.model]);
+
+  // Update node data when settings change
+  useEffect(() => {
+    updateNodeData(id, {
+      ...settings,
+      stats,
+      connectedApiConfig,
+      connectedVectorData,
+      messages,
+      availableModels,
+      isChatWindowOpen,
+      lastUpdated: Date.now()
+    });
+  }, [settings, stats, connectedApiConfig, connectedVectorData, messages, availableModels, isChatWindowOpen, id, updateNodeData]);
+
+  // Handle setting changes
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+  };
+
+  // ENHANCED: Send message with proper endpoint construction
+  const sendMessage = useCallback(async (messageText) => {
+    if (!messageText.trim() || !connectedApiConfig) return;
+
+    const userMessage = {
+      id: Date.now(),
+      text: messageText,
+      sender: 'user',
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+    const startTime = Date.now();
+
+    try {
+      // Construct proper chat completions endpoint
+      let chatEndpoint;
+      if (connectedApiConfig.provider === 'blablador' || connectedApiConfig.endpoint?.includes('blablador')) {
+        chatEndpoint = `${connectedApiConfig.endpoint}/chat/completions`;
+      } else if (connectedApiConfig.provider === 'openai') {
+        chatEndpoint = 'https://api.openai.com/v1/chat/completions';
+      } else {
+        chatEndpoint = `${connectedApiConfig.endpoint}/chat/completions`;
+      }
+
+      console.log('🔍 Using chat endpoint:', chatEndpoint);
+
+      // Prepare messages for API
+      const apiMessages = [];
+
+      if (settings.systemPrompt) {
+        apiMessages.push({
+          role: 'system',
+          content: settings.systemPrompt
+        });
+      }
+
+      // ENHANCED: Better knowledge base integration
+      if (settings.useKnowledgeBase && connectedVectorData?.processedContent) {
+        apiMessages.push({
+          role: 'system',
+          content: `You have access to the hellogitworld repository. Here is the repository content:
+
+${connectedVectorData.processedContent}
+
+Instructions:
+- Use the above repository information to answer questions about the hellogitworld repository
+- Reference specific files and code when relevant
+- Be specific about what the repository contains and does
+- Don't say you don't have access - you have the repository content above`
+        });
+
+        console.log('📚 Added repository context:', connectedVectorData.processedContent.length, 'characters');
+      }
+
+      const recentMessages = messages.slice(-settings.contextWindow);
+      recentMessages.forEach(msg => {
+        apiMessages.push({
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text
+        });
+      });
+
+      apiMessages.push({
+        role: 'user',
+        content: messageText
+      });
+
+      const response = await fetch(chatEndpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${connectedApiConfig.apiKey || connectedApiConfig.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          messages: apiMessages,
+          temperature: settings.creativity,
+          max_tokens: settings.maxResponseLength,
+          stream: false
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`HTTP ${response.status}: ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const responseTime = Date.now() - startTime;
+
+      const assistantMessage = {
+        id: Date.now() + 1,
+        text: data.choices[0].message.content,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        responseTime
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+
+      setStats(prev => ({
+        ...prev,
+        totalMessages: prev.totalMessages + 2,
+        lastMessageTime: Date.now(),
+        tokensUsed: prev.tokensUsed + (data.usage?.total_tokens || 0),
+        averageResponseTime: (prev.averageResponseTime + responseTime) / 2
+      }));
+
+    } catch (error) {
+      console.error('❌ Chat error:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        text: `Error: ${error.message}`,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        isError: true
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [connectedApiConfig, settings, messages]);
+
+  // ENHANCED: Open chat window with comprehensive data
+  const openChatWindow = useCallback(() => {
+    console.log('🔥 Opening chat window...', {
+      nodeId: id,
+      hasApiConfig: !!connectedApiConfig,
+      hasModel: !!settings.model,
+      isConnected: connectedApiConfig?.isConnected,
+      vectorsCount: connectedVectorData?.vectors?.length || 0
+    });
+
+    // Create comprehensive chat data object
+    const chatData = {
+      nodeId: id,
+      apiConfig: connectedApiConfig,
+      settings: settings,
+      messages: messages,
+      sendMessage: sendMessage,
+      isLoading: isLoading,
+      availableModels: availableModels,
+      // ENHANCED: Pass comprehensive vector data
+      vectorData: connectedVectorData ? {
+        vectors: connectedVectorData.vectors,
+        metadata: connectedVectorData.metadata,
+        stats: connectedVectorData.stats,
+        repositoryInfo: connectedVectorData.repositoryInfo,
+        structuredKnowledge: connectedVectorData.structuredKnowledge,
+        processedContent: connectedVectorData.processedContent
+      } : null
+    };
+
+    console.log('🚀 Dispatching openChatWindow event with enhanced data:', {
+      vectorsCount: chatData.vectorData?.vectors?.length || 0,
+      knowledgeSize: chatData.vectorData?.processedContent?.length || 0,
+      hasKnowledge: !!chatData.vectorData?.processedContent
+    });
+
+    // Dispatch custom event to open chat window
+    const chatEvent = new CustomEvent('openChatWindow', {
+      detail: chatData
+    });
+
+    window.dispatchEvent(chatEvent);
+    setIsChatWindowOpen(true);
+  }, [id, connectedApiConfig, settings, messages, sendMessage, isLoading, availableModels, connectedVectorData]);
+
+  // Clear conversation
+  const clearConversation = useCallback(() => {
+    setMessages([]);
+    setStats(prev => ({
+      ...prev,
+      totalMessages: 0,
+      tokensUsed: 0
+    }));
+  }, []);
+
+  // Debug connections
+  const debugConnections = useCallback(() => {
     const edges = getEdges();
     const nodes = getNodes();
 
-    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
+    console.log('🧪 Debug ChatNode connections:');
+    console.log('All edges:', edges);
+    console.log('Edges to this node:', edges.filter(e => e.target === id));
+    console.log('All nodes:', nodes.map(n => ({ id: n.id, type: n.type, hasData: !!n.data })));
+    console.log('API Config:', connectedApiConfig);
+    console.log('Vector Data:', connectedVectorData);
+    console.log('Available Models:', availableModels);
 
-    if (outgoingEdges.length > 0) {
-      console.log(`🔗 ChatNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
+    alert(`Debug Info:
+Node ID: ${id}
+API Connected: ${!!connectedApiConfig?.isConnected}
+Model Selected: ${!!settings.model}
+Vectors Available: ${connectedVectorData?.vectors?.length || 0}
+Knowledge Base Size: ${connectedVectorData?.processedContent?.length || 0} chars
+Use Knowledge Base: ${settings.useKnowledgeBase}
 
-      for (let i = 0; i < outgoingEdges.length; i++) {
-        const edge = outgoingEdges[i];
-        const targetNode = nodes.find(node => node.id === edge.target);
+Check console for detailed logs`);
+  }, [getEdges, getNodes, id, connectedApiConfig, connectedVectorData, availableModels, settings]);
 
-        if (targetNode) {
-          console.log(`🎯 ChatNode: Triggering ${targetNode.type} node ${edge.target}`);
-
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('triggerExecution', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('autoExecute', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-          }, i * 500);
-        }
-      }
+  // Get connection status for display
+  const getConnectionStatus = () => {
+    if (connectedApiConfig && connectedApiConfig.isConnected && settings.model) {
+      return { status: 'ready', message: 'Ready to Chat', color: 'green' };
+    } else if (connectedApiConfig && connectedApiConfig.isConnected && !settings.model) {
+      return { status: 'no-model', message: 'Select Model', color: 'orange' };
+    } else if (connectedApiConfig && !connectedApiConfig.isConnected) {
+      return { status: 'disconnected', message: 'API Disconnected', color: 'red' };
     } else {
-      console.log(`⏹️ ChatNode: No connected nodes found after chat processing`);
+      return { status: 'no-api', message: 'Connect API Config Node', color: 'red' };
     }
-  }, [getEdges, getNodes]);
+  };
 
-  // **COSINE SIMILARITY CALCULATION**
-  const calculateCosineSimilarity = useCallback((vecA, vecB) => {
-    if (vecA.length !== vecB.length) return 0;
-
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
-    }
-
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }, []);
-
-  // **GENERATE QUERY EMBEDDING**
-  const generateQueryEmbedding = useCallback(async (query) => {
-    if (!apiConfig || !apiConfig.apiKey || !apiConfig.apiEndpoint) {
-      throw new Error('API configuration not available');
-    }
-
-    try {
-      const embeddingModel = apiConfig.availableModels?.find(model =>
-        model.id.includes('embedding') ||
-        model.id.includes('embed') ||
-        model.id === 'text-embedding-ada-002' ||
-        model.id === 'alias-embeddings'
-      )?.id || 'text-embedding-ada-002';
-
-      const response = await fetch(`${apiConfig.apiEndpoint}/embeddings`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiConfig.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          input: query,
-          model: embeddingModel,
-          encoding_format: 'float'
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`HTTP ${response.status}: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.data[0].embedding;
-    } catch (error) {
-      console.error(`❌ ChatNode ${id}: Query embedding generation failed:`, error);
-      throw error;
-    }
-  }, [apiConfig, id]);
-
-  // **ADAPTIVE SIMILARITY SEARCH**
-  const adaptiveSimilaritySearch = useCallback(async (queryEmbedding) => {
-    const allChunks = [];
-
-    vectorizedData.forEach(vectorData => {
-      if (vectorData.vectorizedFiles) {
-        vectorData.vectorizedFiles.forEach(file => {
-          if (file.chunks) {
-            file.chunks.forEach(chunk => {
-              if (chunk.embedding) {
-                allChunks.push({
-                  ...chunk,
-                  sourceFile: file.originalFile.name,
-                  filePath: file.originalFile.path,
-                  parser: file.parser
-                });
-              }
-            });
-          }
-        });
-      }
-    });
-
-    const similarities = allChunks.map(chunk => {
-      const similarity = calculateCosineSimilarity(queryEmbedding, chunk.embedding);
-      return { ...chunk, similarity };
-    }).sort((a, b) => b.similarity - a.similarity);
-
-    console.log(`🔍 ChatNode ${id}: Top similarities:`,
-      similarities.slice(0, 5).map(s => s.similarity.toFixed(3))
-    );
-
-    // Auto-detect optimal threshold
-    const topSimilarity = similarities[0]?.similarity || 0;
-    const adaptiveThreshold = Math.max(topSimilarity * 0.7, 0.2);
-    const effectiveThreshold = Math.min(similarityThreshold, adaptiveThreshold);
-
-    const topChunks = similarities
-      .slice(0, topK)
-      .filter(chunk => chunk.similarity >= effectiveThreshold);
-
-    if (topChunks.length === 0 && similarities.length > 0) {
-      console.log(`⚠️ ChatNode ${id}: No chunks above threshold, using best match`);
-      topChunks.push(similarities[0]);
-    }
-
-    console.log(`✅ ChatNode ${id}: Found ${topChunks.length} chunks (adaptive threshold: ${effectiveThreshold.toFixed(3)})`);
-
-    return topChunks;
-  }, [vectorizedData, topK, similarityThreshold, calculateCosineSimilarity, id]);
-
-  // **AUTO-CONFIGURE SETTINGS**
-  const autoConfigureSettings = useCallback(() => {
-    if (vectorizedData.length === 0) return;
-
-    let totalChunks = 0;
-    let hasCodeContent = false;
-    let hasDocumentation = false;
-
-    vectorizedData.forEach(vectorData => {
-      if (vectorData.vectorizedFiles) {
-        vectorData.vectorizedFiles.forEach(file => {
-          if (file.chunks) {
-            totalChunks += file.chunks.length;
-
-            if (file.parser === 'code' || file.originalFile.name.match(/\.(js|py|java|cpp|ts)$/)) {
-              hasCodeContent = true;
-            }
-            if (file.parser === 'markdown' || file.originalFile.name.match(/\.(md|txt|rst)$/)) {
-              hasDocumentation = true;
-            }
-          }
-        });
-      }
-    });
-
-    let recommendedThreshold = 0.4;
-    let recommendedTopK = 5;
-
-    if (hasCodeContent) {
-      recommendedThreshold = 0.3;
-      recommendedTopK = 3;
-      console.log(`🤖 ChatNode ${id}: Detected code content, adjusting settings`);
-    }
-
-    if (hasDocumentation) {
-      recommendedThreshold = 0.5;
-      recommendedTopK = 7;
-      console.log(`📚 ChatNode ${id}: Detected documentation, adjusting settings`);
-    }
-
-    if (totalChunks < 10) {
-      recommendedThreshold = 0.2;
-      console.log(`📊 ChatNode ${id}: Small dataset detected, lowering threshold`);
-    }
-
-    if (similarityThreshold === 0.7) {
-      setSimilarityThreshold(recommendedThreshold);
-    }
-    if (topK === 5) {
-      setTopK(recommendedTopK);
-    }
-
-    console.log(`⚙️ ChatNode ${id}: Auto-configured - Threshold: ${recommendedThreshold}, TopK: ${recommendedTopK}`);
-  }, [vectorizedData, similarityThreshold, topK, id]);
-
-  useEffect(() => {
-    autoConfigureSettings();
-  }, [vectorizedData, autoConfigureSettings]);
-
-  // **RETRIEVE RELEVANT CHUNKS**
-  const retrieveRelevantChunks = useCallback(async (queryEmbedding) => {
-    return await adaptiveSimilaritySearch(queryEmbedding);
-  }, [adaptiveSimilaritySearch]);
-
-  // **GENERATE CHAT COMPLETION WITH CONVERSATION HISTORY** - **ENHANCED**
-  const generateChatCompletion = useCallback(async (query, relevantChunks, conversationHistory = []) => {
-    if (!apiConfig || !apiConfig.apiKey || !selectedModel) {
-      throw new Error('API configuration or model not selected');
-    }
-
-    const context = relevantChunks.map(chunk =>
-      `Source: ${chunk.sourceFile}\n${chunk.content}`
-    ).join('\n\n---\n\n');
-
-    // **NEW: Build conversation history for context**
-    const messages = [
-      {
-        role: 'system',
-        content: `${systemPrompt}\n\nContext:\n${context}`
-      }
-    ];
-
-    // **NEW: Add conversation history (last 6 messages)**
-    const recentHistory = conversationHistory.slice(-6);
-    recentHistory.forEach(msg => {
-      messages.push({
-        role: msg.role,
-        content: msg.content
-      });
-    });
-
-    // Add current query
-    messages.push({
-      role: 'user',
-      content: query
-    });
-
-    try {
-      const response = await fetch(`${apiConfig.apiEndpoint}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiConfig.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: messages,
-          temperature: temperature,
-          max_tokens: maxTokens
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`HTTP ${response.status}: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      return {
-        response: data.choices[0].message.content,
-        usage: data.usage,
-        model: selectedModel,
-        relevantChunks: relevantChunks,
-        query: query
-      };
-    } catch (error) {
-      console.error(`❌ ChatNode ${id}: Chat completion failed:`, error);
-      throw error;
-    }
-  }, [apiConfig, selectedModel, systemPrompt, temperature, maxTokens, id]);
-
-  // **MAIN CHAT PROCESSING**
-  const processChatQuery = useCallback(async (queryText = null, isFollowUp = false) => {
-    const query = queryText || textInput;
-
-    if (!query.trim()) {
-      setError('Please enter a query');
-      return;
-    }
-
-    if (!apiConfig || !apiConfig.apiKey || !selectedModel) {
-      setError('Please connect API configuration and select a model');
-      return;
-    }
-
-    if (vectorizedData.length === 0) {
-      setError('Please connect vectorized data sources');
-      return;
-    }
-
-    setIsProcessing(true);
-    setError(null);
-    console.log(`🔄 ChatNode ${id}: Processing query: "${query}"`);
-
-    try {
-      // **NEW: Add user message to conversation if it's a follow-up**
-      if (isFollowUp) {
-        const userMessage = {
-          role: 'user',
-          content: query,
-          timestamp: new Date().toISOString()
-        };
-        setConversation(prev => [...prev, userMessage]);
-      }
-
-      const queryEmbedding = await generateQueryEmbedding(query);
-      const relevantChunks = await retrieveRelevantChunks(queryEmbedding);
-
-      if (relevantChunks.length === 0) {
-        throw new Error(`No relevant content found for query (threshold: ${similarityThreshold})`);
-      }
-
-      // **NEW: Pass conversation history for context**
-      const result = await generateChatCompletion(query, relevantChunks, conversation);
-
-      const responseData = {
-        ...result,
-        processedAt: new Date().toISOString(),
-        config: {
-          topK,
-          similarityThreshold,
-          temperature,
-          maxTokens,
-          systemPrompt
-        }
-      };
-
-      if (isFollowUp) {
-        // **NEW: Add assistant response to conversation**
-        const assistantMessage = {
-          role: 'assistant',
-          content: result.response,
-          timestamp: new Date().toISOString(),
-          relevantChunks: result.relevantChunks,
-          usage: result.usage
-        };
-        setConversation(prev => [...prev, assistantMessage]);
-      } else {
-        // **NEW: Initialize conversation for first query**
-        setChatResponse(responseData);
-        const initialConversation = [
-          {
-            role: 'user',
-            content: query,
-            timestamp: responseData.processedAt
-          },
-          {
-            role: 'assistant',
-            content: result.response,
-            timestamp: responseData.processedAt,
-            relevantChunks: result.relevantChunks,
-            usage: result.usage
-          }
-        ];
-        setConversation(initialConversation);
-        setShowChat(true); // **NEW: Show chat interface after first response**
-      }
-
-      console.log(`✅ ChatNode ${id}: Chat processing complete`);
-
-      if (!isFollowUp) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await triggerNextNodes(id);
-      }
-
-    } catch (error) {
-      console.error(`❌ ChatNode ${id}: Chat processing failed:`, error);
-      setError(`Chat processing failed: ${error.message}`);
-
-      if (isFollowUp) {
-        // **NEW: Add error message to conversation**
-        const errorMessage = {
-          role: 'assistant',
-          content: `Sorry, I encountered an error: ${error.message}`,
-          timestamp: new Date().toISOString(),
-          isError: true
-        };
-        setConversation(prev => [...prev, errorMessage]);
-      }
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [textInput, apiConfig, selectedModel, vectorizedData, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, generateQueryEmbedding, retrieveRelevantChunks, generateChatCompletion, triggerNextNodes, conversation]);
-
-  // **NEW: Handle follow-up questions**
-  const handleFollowUpQuestion = useCallback(async () => {
-    if (!currentInput.trim()) return;
-
-    const query = currentInput.trim();
-    setCurrentInput('');
-
-    await processChatQuery(query, true);
-  }, [currentInput, processChatQuery]);
-
-  // **NEW: Handle Enter key in chat input**
-  const handleKeyPress = useCallback((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleFollowUpQuestion();
-    }
-  }, [handleFollowUpQuestion]);
-
-  // **NEW: Auto-scroll chat to bottom**
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [conversation]);
-
-  // **DEBOUNCED NODE DATA UPDATE** - **ENHANCED**
-  useEffect(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(() => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                apiConfig,
-                vectorizedData,
-                textInput,
-                chatResponse,
-                conversation, // **NEW: Save conversation**
-                selectedModel,
-                topK,
-                similarityThreshold,
-                temperature,
-                maxTokens,
-                systemPrompt,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-          }
-          return node;
-        })
-      );
-    }, 1000);
-
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, [apiConfig, vectorizedData, textInput, chatResponse, conversation, selectedModel, topK, similarityThreshold, temperature, maxTokens, systemPrompt, id, setNodes]);
-
-  // **ENHANCED DATA DETECTION - RECEIVES FROM MULTIPLE SOURCES**
-  useEffect(() => {
-    const checkForInputData = () => {
-      try {
-        const edges = getEdges();
-        const nodes = getNodes();
-
-        console.log(`🔍 ChatNode ${id}: Checking for input data (attempt #${dataCheckCounter})`);
-
-        const incomingEdges = edges.filter(edge => edge.target === id);
-
-        incomingEdges.forEach(edge => {
-          const sourceNode = nodes.find(node => node.id === edge.source);
-
-          if (sourceNode && sourceNode.data) {
-            if (sourceNode.data.apiKey && sourceNode.data.apiEndpoint) {
-              console.log(`✅ ChatNode ${id}: Found API configuration`);
-              setApiConfig({
-                apiKey: sourceNode.data.apiKey,
-                apiEndpoint: sourceNode.data.apiEndpoint,
-                availableModels: sourceNode.data.availableModels || []
-              });
-
-              if (!selectedModel && sourceNode.data.availableModels) {
-                const chatModels = sourceNode.data.availableModels.filter(model =>
-                  model.id.includes('gpt') ||
-                  model.id.includes('claude') ||
-                  model.id.includes('chat') ||
-                  model.id.includes('mistral') ||
-                  model.id.includes('llama')
-                );
-                if (chatModels.length > 0) {
-                  setSelectedModel(chatModels[0].id);
-                }
-              }
-            }
-
-            if (sourceNode.data.vectorizedData || sourceNode.data.vectorizedFiles) {
-              console.log(`✅ ChatNode ${id}: Found vectorized data`);
-              const vectorData = sourceNode.data.vectorizedData || sourceNode.data;
-              setVectorizedData(prev => {
-                const existingIndex = prev.findIndex(item => item.sourceNodeId === edge.source);
-                if (existingIndex >= 0) {
-                  const updated = [...prev];
-                  updated[existingIndex] = { ...vectorData, sourceNodeId: edge.source };
-                  return updated;
-                } else {
-                  return [...prev, { ...vectorData, sourceNodeId: edge.source }];
-                }
-              });
-            }
-
-            if (sourceNode.data.text || sourceNode.data.content) {
-              console.log(`✅ ChatNode ${id}: Found text input`);
-              setTextInput(sourceNode.data.text || sourceNode.data.content);
-            }
-          }
-        });
-
-      } catch (error) {
-        console.error(`❌ ChatNode ${id}: Error checking input data:`, error);
-      }
-    };
-
-    checkForInputData();
-  }, [getEdges, getNodes, id, dataCheckCounter, selectedModel]);
-
-  // **PERIODIC DATA CHECK WHEN WAITING**
-  useEffect(() => {
-    if (!apiConfig || vectorizedData.length === 0) {
-      const interval = setInterval(() => {
-        console.log(`🔍 ChatNode ${id}: Periodic data check #${dataCheckCounter}`);
-        setDataCheckCounter(prev => prev + 1);
-      }, 2000);
-
-      return () => clearInterval(interval);
-    }
-  }, [apiConfig, vectorizedData, dataCheckCounter, id]);
-
-  // **NODE EXECUTION HANDLER**
-  const handleNodeExecution = useCallback(async (inputData) => {
-    console.log(`🎯 ChatNode ${id}: Executing with input data:`, inputData);
-
-    try {
-      Object.values(inputData).forEach(data => {
-        if (data.vectorizedFiles) {
-          console.log(`📥 ChatNode ${id}: Processing vectorized data`);
-          setVectorizedData(prev => [...prev, data]);
-        }
-        if (data.apiKey && data.apiEndpoint) {
-          console.log(`📥 ChatNode ${id}: Processing API config`);
-          setApiConfig(data);
-        }
-        if (data.text || data.content) {
-          console.log(`📥 ChatNode ${id}: Processing text input`);
-          setTextInput(data.text || data.content);
-        }
-      });
-
-      if (inputData && Object.keys(inputData).length > 0) {
-        console.log(`🔄 ChatNode ${id}: Auto-processing after receiving data`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        if (chatButtonRef.current && !isProcessing && apiConfig && vectorizedData.length > 0 && textInput) {
-          console.log(`✅ ChatNode ${id}: Triggering chat button`);
-          chatButtonRef.current.click();
-        }
-      }
-    } catch (error) {
-      console.error(`❌ ChatNode ${id}: Error during execution:`, error);
-    }
-  }, [id, isProcessing, apiConfig, vectorizedData, textInput]);
-
-  // **AUTO-EXECUTION EVENT LISTENER**
-  useEffect(() => {
-    const handleAutoExecution = (event) => {
-      if (event.detail.nodeId === id) {
-        console.log(`🎯 ChatNode ${id}: Auto-triggered for execution`);
-
-        if (chatButtonRef.current && !isProcessing && apiConfig && vectorizedData.length > 0 && textInput && selectedModel) {
-          console.log(`✅ ChatNode ${id}: Triggering chat button click`);
-          chatButtonRef.current.click();
-          return;
-        }
-
-        if (!isProcessing && apiConfig && vectorizedData.length > 0 && textInput && selectedModel) {
-          console.log(`✅ ChatNode ${id}: Direct function call for auto-execution`);
-          processChatQuery();
-        } else {
-          console.log(`⚠️ ChatNode ${id}: Cannot auto-execute - missing requirements`);
-        }
-      }
-    };
-
-    window.addEventListener('triggerExecution', handleAutoExecution);
-    window.addEventListener('triggerPlayButton', handleAutoExecution);
-    window.addEventListener('autoExecute', handleAutoExecution);
-
-    return () => {
-      window.removeEventListener('triggerExecution', handleAutoExecution);
-      window.removeEventListener('triggerPlayButton', handleAutoExecution);
-      window.removeEventListener('autoExecute', handleAutoExecution);
-    };
-  }, [id, isProcessing, apiConfig, vectorizedData, textInput, selectedModel, processChatQuery]);
-
-  const handleDelete = useCallback((e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  }, [id]);
-
-  const handleInteractionEvent = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
-
-  // **AVAILABLE CHAT MODELS**
-  const chatModels = useMemo(() => {
-    if (!apiConfig || !apiConfig.availableModels) return [];
-
-    return apiConfig.availableModels.filter(model =>
-      model.id.includes('gpt') ||
-      model.id.includes('claude') ||
-      model.id.includes('chat') ||
-      model.id.includes('mistral') ||
-      model.id.includes('llama') ||
-      model.id.includes('gemini') ||
-      (!model.id.includes('embedding') && !model.id.includes('embed'))
-    );
-  }, [apiConfig]);
-
-  // **CHAT STATISTICS** - **ENHANCED**
-  const chatStats = useMemo(() => {
-    if (!chatResponse && conversation.length === 0) return null;
-
-    const totalSources = vectorizedData.length;
-    const totalChunks = vectorizedData.reduce((sum, data) => {
-      return sum + (data.vectorizedFiles?.reduce((fileSum, file) => fileSum + (file.chunks?.length || 0), 0) || 0);
-    }, 0);
-
-    const relevantChunks = chatResponse?.relevantChunks?.length ||
-      conversation.filter(msg => msg.relevantChunks).reduce((sum, msg) => sum + msg.relevantChunks.length, 0);
-
-    return {
-      totalSources,
-      totalChunks,
-      relevantChunks,
-      conversationLength: conversation.length,
-      model: chatResponse?.model || selectedModel
-    };
-  }, [chatResponse, vectorizedData, conversation, selectedModel]);
+  const connectionStatus = getConnectionStatus();
 
   return (
-    <motion.div
-      className={`relative w-[500px] bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 border-2 border-emerald-200 rounded-xl shadow-lg group nowheel overflow-visible ${
-        selected ? 'ring-2 ring-emerald-300' : ''
-      }`}
-      style={{ minHeight: showChat ? '800px' : '700px' }} // **NEW: Dynamic height**
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('input, button, select, textarea, .nowheel, .nodrag')) {
-          e.stopPropagation();
-        }
-      }}
-      whileHover={{
-        scale: 1.01,
-        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
-      }}
-    >
-      {/* Background Beams when processing */}
-      <AnimatePresence>
-        {isProcessing && (
-          <BackgroundBeams className="opacity-20" />
-        )}
-      </AnimatePresence>
+    <div className="relative">
+      {/* Handles */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="input"
+        className="w-3 h-3 bg-blue-400 border-2 border-white"
+        style={{ top: '20px' }}
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="api-config"
+        className="w-3 h-3 bg-purple-400 border-2 border-white"
+        style={{ top: '40px' }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="output"
+        className="w-3 h-3 bg-green-400 border-2 border-white"
+        style={{ top: '20px' }}
+      />
 
-      {/* **FIXED: PlayButton positioning** */}
-      <div className="absolute -top-4 -left-4 z-30">
-        <PlayButton
-          nodeId={id}
-          nodeType="chat"
-          onExecute={handleNodeExecution}
-          disabled={isProcessing}
-        />
-      </div>
-
-      {/* **FIXED: Delete button positioning** */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      <motion.div
+        className={`bg-white rounded-xl shadow-lg border-2 transition-all duration-300 overflow-hidden cursor-pointer ${
+          selected ? 'border-emerald-400 shadow-emerald-100' : 'border-gray-200'
         }`}
-        title="Delete node"
-        whileHover={{ scale: 1.1, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
+        style={{ width: '300px', minHeight: '140px' }}
+        whileHover={{ scale: 1.02 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
+        onClick={connectionStatus.status === 'ready' ? openChatWindow : undefined}
       >
-        ×
-      </motion.button>
+        <BackgroundBeams className="rounded-xl" />
 
-      {/* **MULTIPLE INPUT HANDLES** */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="apiConfig"
-        style={{
-          background: 'linear-gradient(45deg, #06b6d4, #0891b2)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(6, 182, 212, 0.4)',
-          left: '-8px',
-          top: '25%'
-        }}
-        isConnectable={isConnectable}
-      />
-
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="vectors"
-        style={{
-          background: 'linear-gradient(45deg, #8b5cf6, #7c3aed)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(139, 92, 246, 0.4)',
-          left: '-8px',
-          top: '50%'
-        }}
-        isConnectable={isConnectable}
-      />
-
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="textInput"
-        style={{
-          background: 'linear-gradient(45deg, #10b981, #059669)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-          left: '-8px',
-          top: '75%'
-        }}
-        isConnectable={isConnectable}
-      />
-
-      <div className="p-4 pt-8 nowheel">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-2">
-            <FloatingIcon isProcessing={isProcessing}>
-              <span className="text-xl">💬</span>
-            </FloatingIcon>
-            <h3 className="text-sm font-semibold text-emerald-800">
-              RAG Chat Interface
-            </h3>
-          </div>
-
-          {/* **NEW: Chat toggle button** */}
-          {conversation.length > 0 && (
-            <motion.button
-              onClick={() => setShowChat(!showChat)}
-              className="text-xs bg-emerald-200 hover:bg-emerald-300 px-2 py-1 rounded transition-colors nodrag"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              {showChat ? '📖 Hide Chat' : '💬 Show Chat'}
-            </motion.button>
-          )}
-        </div>
-
-        {/* Connection Status */}
-        <div className="mb-4 space-y-2">
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              apiConfig
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : 'bg-cyan-50 text-cyan-600 border border-cyan-200'
-            }`}
-          >
-            {apiConfig ? '🔑 API Connected' : '⏸️ Waiting for API config'}
-          </div>
-
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              vectorizedData.length > 0
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : 'bg-purple-50 text-purple-600 border border-purple-200'
-            }`}
-          >
-            {vectorizedData.length > 0 ? `🔮 ${vectorizedData.length} Vector Source(s)` : '⏸️ Waiting for vectors'}
-          </div>
-        </div>
-
-        {/* **NEW: Chat Interface** */}
-        <AnimatePresence>
-          {showChat && conversation.length > 0 && (
-            <motion.div
-              className="mb-4 bg-white border border-emerald-200 rounded-lg shadow-sm overflow-hidden"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <div className="bg-emerald-100 px-3 py-2 border-b border-emerald-200">
-                <div className="text-xs font-medium text-emerald-700">💬 Conversation ({conversation.length} messages)</div>
+        <div className="relative z-10 p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-green-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">💬</span>
               </div>
-
-              <div
-                ref={chatContainerRef}
-                className="h-64 overflow-y-auto p-3 space-y-3 nowheel"
-                onMouseDown={handleInteractionEvent}
+              <div>
+                <h3 className="font-semibold text-gray-800">AI Chat</h3>
+                <p className="text-xs text-gray-500">
+                  {settings.model || 'No model selected'}
+                  {messages.length > 0 && (
+                    <span className="text-green-600"> • {messages.length} messages</span>
+                  )}
+                  {connectedVectorData && connectedVectorData.vectors.length > 0 && (
+                    <span className="text-blue-600"> • {connectedVectorData.vectors.length} vectors</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSettings(!showSettings);
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+                title="Settings"
               >
-                {conversation.map((message, index) => (
-                  <motion.div
-                    key={index}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <div
-                      className={`max-w-[80%] p-2 rounded-lg text-xs ${
-                        message.role === 'user'
-                          ? 'bg-emerald-500 text-white'
-                          : message.isError
-                          ? 'bg-red-50 text-red-700 border border-red-200'
-                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap">{message.content}</div>
-                      {message.relevantChunks && message.relevantChunks.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-emerald-300 text-xs opacity-75">
-                          📄 Sources: {message.relevantChunks.map(chunk => chunk.sourceFile).join(', ')}
-                        </div>
-                      )}
-                      <div className="text-xs opacity-50 mt-1">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                ⚙️
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  debugConnections();
+                }}
+                className="w-6 h-6 flex items-center justify-center rounded bg-red-100 hover:bg-red-200 transition-colors"
+                title="Debug Connections"
+              >
+                🧪
+              </button>
+              {messages.length > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearConversation();
+                  }}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-red-100 hover:bg-red-200 transition-colors"
+                  title="Clear Conversation"
+                >
+                  🗑️
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
-                {isProcessing && (
-                  <motion.div
-                    className="flex justify-start"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                  >
-                    <div className="bg-emerald-50 text-emerald-600 p-2 rounded-lg text-xs border border-emerald-200">
-                      <motion.div
-                        className="flex space-x-1"
-                        animate={{ opacity: [0.5, 1, 0.5] }}
-                        transition={{ duration: 1.5, repeat: Infinity }}
-                      >
-                        <span>●</span>
-                        <span>●</span>
-                        <span>●</span>
-                      </motion.div>
-                    </div>
-                  </motion.div>
+        {/* ENHANCED: Clean Status Display with Repository Info */}
+        <div className="relative z-10 px-4 py-3 border-b border-gray-100">
+          <div
+            className={`text-sm px-3 py-2 rounded-lg text-center font-medium transition-all cursor-pointer ${
+              connectionStatus.color === 'green'
+                ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                : connectionStatus.color === 'orange'
+                ? 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                : 'bg-red-100 text-red-800'
+            }`}
+            onClick={connectionStatus.status === 'ready' ? openChatWindow : undefined}
+          >
+            {connectionStatus.status === 'ready' ? (
+              <>
+                <span className="text-lg">💬</span>
+                <div className="mt-1">Click to Open Chat</div>
+                <div className="text-xs opacity-75">
+                  {connectedApiConfig?.provider === 'blablador' ? 'Blablador (JSC)' :
+                   connectedApiConfig?.provider === 'openai' ? 'OpenAI' :
+                   connectedApiConfig?.provider || 'API'} • {settings.model}
+                </div>
+                {connectedVectorData && connectedVectorData.vectors.length > 0 && (
+                  <div className="text-xs opacity-75 mt-1 text-blue-700">
+                    📚 Repository loaded ({connectedVectorData.vectors.length} vectors)
+                  </div>
                 )}
-              </div>
-
-              {/* **NEW: Chat Input Area** */}
-              <div className="border-t border-emerald-200 p-3">
-                <div className="flex space-x-2">
-                  <motion.textarea
-                    ref={inputRef}
-                    value={currentInput}
-                    onChange={(e) => setCurrentInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    onMouseDown={handleInteractionEvent}
-                    placeholder="Ask a follow-up question..."
-                    className="flex-1 p-2 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-emerald-800 nodrag resize-none"
-                    rows={2}
-                    disabled={isProcessing || !apiConfig || !selectedModel}
-                    whileFocus={{ scale: 1.01 }}
-                  />
-                  <motion.button
-                    onClick={handleFollowUpQuestion}
-                    onMouseDown={handleInteractionEvent}
-                    disabled={isProcessing || !currentInput.trim() || !apiConfig || !selectedModel}
-                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 nodrag ${
-                      isProcessing || !currentInput.trim() || !apiConfig || !selectedModel
-                        ? 'bg-emerald-200 text-emerald-500 cursor-not-allowed'
-                        : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm'
-                    }`}
-                    whileHover={{ scale: isProcessing || !currentInput.trim() || !apiConfig || !selectedModel ? 1 : 1.05 }}
-                    whileTap={{ scale: isProcessing || !currentInput.trim() || !apiConfig || !selectedModel ? 1 : 0.95 }}
-                  >
-                    {isProcessing ? '⏳' : '📤'}
-                  </motion.button>
+              </>
+            ) : (
+              <>
+                <span className="text-lg">⚠️</span>
+                <div className="mt-1">{connectionStatus.message}</div>
+                <div className="text-xs opacity-75">
+                  {connectionStatus.status === 'no-model' ? 'Select a model in settings' :
+                   connectionStatus.status === 'disconnected' ? 'Check API configuration' :
+                   'Connect an API Configuration node'}
                 </div>
-                <div className="text-xs text-emerald-500 mt-1">
-                  Press Enter to send • Shift+Enter for new line
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </>
+            )}
+          </div>
+        </div>
 
-        {/* Model Selection */}
-        {apiConfig && chatModels.length > 0 && (
-          <div className="mb-4">
-            <label className="text-xs font-medium text-emerald-700 mb-2 block">
-              🤖 Chat Model
-            </label>
-            <motion.select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            >
-              <option value="">Select chat model...</option>
-              {chatModels.map(model => (
-                <option key={model.id} value={model.id}>
-                  {model.id} {model.owned_by ? `(${model.owned_by})` : ''}
-                </option>
-              ))}
-            </motion.select>
-            <div className="text-xs text-emerald-600 mt-1">
-              {chatModels.length} chat models available
+        {/* Enhanced Message Stats */}
+        {(messages.length > 0 || (connectedVectorData && connectedVectorData.vectors.length > 0)) && (
+          <div className="relative z-10 px-4 py-2 bg-emerald-50 border-b border-emerald-100">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center">
+                <div className="font-semibold text-emerald-700">{messages.length}</div>
+                <div className="text-emerald-600">Messages</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-emerald-700">{connectedVectorData?.vectors?.length || 0}</div>
+                <div className="text-emerald-600">Vectors</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-emerald-700">{Math.round(stats.averageResponseTime) || 0}ms</div>
+                <div className="text-emerald-600">Avg Time</div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Text Input */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-emerald-700 mb-2 block">
-            💭 Your Query
-          </label>
-          <motion.textarea
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            onMouseDown={handleInteractionEvent}
-            placeholder="Ask a question about your documents..."
-            className="w-full p-3 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-800 nodrag resize-none"
-            rows={3}
-            whileFocus={{ scale: 1.01 }}
-          />
-        </div>
-
-        {/* Retrieval Settings */}
-        <div className="mb-4 space-y-3">
-          <label className="text-xs font-medium text-emerald-700 block">🔍 Retrieval Settings</label>
-
-          {/* Top-K */}
-          <div>
-            <label className="text-xs text-emerald-600 mb-1 block">
-              📊 Top-K Results: {topK}
-            </label>
-            <motion.input
-              type="range"
-              min="1"
-              max="20"
-              step="1"
-              value={topK}
-              onChange={(e) => setTopK(parseInt(e.target.value))}
-              onMouseDown={handleInteractionEvent}
-              className="w-full accent-emerald-500 nodrag nowheel"
-              whileHover={{ scale: 1.01 }}
-            />
-          </div>
-
-          {/* Similarity Threshold */}
-          <div>
-            <label className="text-xs text-emerald-600 mb-1 block">
-              🎯 Similarity Threshold: {similarityThreshold}
-            </label>
-            <motion.input
-              type="range"
-              min="0.1"
-              max="1.0"
-              step="0.05"
-              value={similarityThreshold}
-              onChange={(e) => setSimilarityThreshold(parseFloat(e.target.value))}
-              onMouseDown={handleInteractionEvent}
-              className="w-full accent-emerald-500 nodrag nowheel"
-              whileHover={{ scale: 1.01 }}
-            />
-          </div>
-        </div>
-
-        {/* Generation Settings */}
-        <div className="mb-4 space-y-3">
-          <label className="text-xs font-medium text-emerald-700 block">⚙️ Generation Settings</label>
-
-          {/* Temperature */}
-          <div>
-            <label className="text-xs text-emerald-600 mb-1 block">
-              🌡️ Temperature: {temperature}
-            </label>
-            <motion.input
-              type="range"
-              min="0.0"
-              max="1.0"
-              step="0.1"
-              value={temperature}
-              onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              onMouseDown={handleInteractionEvent}
-              className="w-full accent-emerald-500 nodrag nowheel"
-              whileHover={{ scale: 1.01 }}
-            />
-          </div>
-
-          {/* Max Tokens */}
-          <div>
-            <label className="text-xs text-emerald-600 mb-1 block">
-              📝 Max Tokens: {maxTokens}
-            </label>
-            <motion.input
-              type="range"
-              min="100"
-              max="4000"
-              step="100"
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(parseInt(e.target.value))}
-              onMouseDown={handleInteractionEvent}
-              className="w-full accent-emerald-500 nodrag nowheel"
-              whileHover={{ scale: 1.01 }}
-            />
-          </div>
-        </div>
-
-        {/* System Prompt */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-emerald-700 mb-2 block">
-            🎭 System Prompt
-          </label>
-          <motion.textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            onMouseDown={handleInteractionEvent}
-            placeholder="You are a helpful assistant..."
-            className="w-full p-2 text-xs border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-gradient-to-r from-emerald-50 to-teal-50 text-emerald-800 nodrag resize-none"
-            rows={2}
-            whileFocus={{ scale: 1.01 }}
-          />
-        </div>
-
-        {/* Process Query Button */}
-        <motion.button
-          ref={chatButtonRef}
-          onClick={() => processChatQuery()}
-          onMouseDown={handleInteractionEvent}
-          disabled={isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
-            isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0
-              ? 'bg-emerald-200 text-emerald-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg'
-          }`}
-          whileHover={{
-            scale: isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0 ? 1 : 1.02,
-            boxShadow: isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0 ? undefined : "0 8px 20px rgba(16, 185, 129, 0.3)"
-          }}
-          whileTap={{ scale: isProcessing || !textInput.trim() || !apiConfig || !selectedModel || vectorizedData.length === 0 ? 1 : 0.98 }}
-        >
-          <div className="flex items-center justify-center space-x-2">
-            {isProcessing ? (
-              <>
-                <motion.div
-                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-                <span>Processing Query...</span>
-              </>
-            ) : (
-              <>
-                <span>💬</span>
-                <span>Process Query</span>
-              </>
-            )}
-          </div>
-        </motion.button>
-
-        {/* **DEBUG INFO - TEMPORARY** */}
-        {(!apiConfig || vectorizedData.length === 0) && (
-          <div className="text-xs bg-yellow-50 border border-yellow-200 rounded p-2 mb-3">
-            <div className="font-medium text-yellow-800 mb-1">🐛 Debug Info</div>
-            <div>Connected edges: {getEdges().filter(e => e.target === id).length}</div>
-            <div>Check attempts: {dataCheckCounter}</div>
-            <div>Has API config: {apiConfig ? 'Yes' : 'No'}</div>
-            <div>Vector sources: {vectorizedData.length}</div>
-            <div>Selected model: {selectedModel || 'None'}</div>
-            <div>Query length: {textInput.length} chars</div>
-            <div>Conversation messages: {conversation.length}</div>
-          </div>
-        )}
-
-        {/* Error Display */}
+        {/* Settings Panel */}
         <AnimatePresence>
-          {error && (
+          {showSettings && (
             <motion.div
-              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-              initial={{ opacity: 0, y: -10, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="relative z-10 border-b border-gray-100 bg-gray-50/50"
             >
-              ❌ {error}
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <div className="p-4 space-y-4">
+                {/* Model Selection */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Chat Model
+                    {availableModels.length > 0 && (
+                      <span className="text-green-600"> ({availableModels.length} available)</span>
+                    )}
+                  </label>
+                  <select
+                    value={settings.model}
+                    onChange={(e) => handleSettingChange('model', e.target.value)}
+                    disabled={!connectedApiConfig || availableModels.length === 0}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:opacity-50"
+                  >
+                    <option value="">Select a model...</option>
+                    {availableModels.map(model => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
+                </div>
 
-        {/* Chat Results */}
-        <AnimatePresence>
-          {chatStats && (
-            <motion.div
-              className="text-xs bg-white border border-emerald-200 rounded-lg overflow-hidden shadow-lg nowheel"
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              onMouseDown={handleInteractionEvent}
-            >
-              <motion.div
-                className="bg-gradient-to-r from-emerald-50 to-teal-50 p-3 cursor-pointer hover:from-emerald-100 hover:to-teal-100 transition-all duration-300 nodrag"
-                onClick={() => setIsExpanded(!isExpanded)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-emerald-800">
-                    ✅ Chat Active ({chatStats.conversationLength} messages)
+                {/* Creativity Slider */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Creativity ({settings.creativity})
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={settings.creativity}
+                    onChange={(e) => handleSettingChange('creativity', parseFloat(e.target.value))}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-full nodrag"
+                  />
+                </div>
+
+                {/* Max Response Length */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Max Response Length ({settings.maxResponseLength} tokens)
+                  </label>
+                  <input
+                    type="range"
+                    min="500"
+                    max="4000"
+                    step="100"
+                    value={settings.maxResponseLength}
+                    onChange={(e) => handleSettingChange('maxResponseLength', parseInt(e.target.value))}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-full nodrag"
+                  />
+                </div>
+
+                {/* Use Knowledge Base Toggle */}
+                <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Use Knowledge Base</label>
+                    <p className="text-xs text-gray-500">Add repository data as context</p>
                   </div>
-                  <motion.span
-                    animate={{ rotate: isExpanded ? 180 : 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                    className="text-emerald-600"
-                  >
-                    ▼
-                  </motion.span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.useKnowledgeBase}
+                      onChange={(e) => handleSettingChange('useKnowledgeBase', e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
                 </div>
-                <div className="text-emerald-700 text-xs mt-1">
-                  {chatStats.relevantChunks} relevant chunks from {chatStats.totalSources} sources
+
+                {/* System Prompt */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    System Prompt
+                  </label>
+                  <textarea
+                    value={settings.systemPrompt}
+                    onChange={(e) => handleSettingChange('systemPrompt', e.target.value)}
+                    placeholder="You are a helpful assistant..."
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none"
+                    rows="3"
+                  />
                 </div>
-              </motion.div>
 
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    className="max-h-64 overflow-y-auto bg-white p-2 nowheel"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onMouseDown={handleInteractionEvent}
-                  >
-                    {/* Chat Statistics */}
-                    <div className="mb-3">
-                      <div className="font-medium text-emerald-700 mb-1">📊 Chat Statistics</div>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-emerald-600">Model:</span>
-                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.model}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-emerald-600">Messages:</span>
-                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.conversationLength}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-emerald-600">Total sources:</span>
-                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.totalSources}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-emerald-600">Available chunks:</span>
-                          <span className="text-emerald-500 bg-emerald-100 px-1 rounded">{chatStats.totalChunks}</span>
-                        </div>
-                      </div>
-                    </div>
+                {/* Context Window */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Context Window ({settings.contextWindow} messages)
+                  </label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="20"
+                    step="1"
+                    value={settings.contextWindow}
+                    onChange={(e) => handleSettingChange('contextWindow', parseInt(e.target.value))}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-full nodrag"
+                  />
+                </div>
 
-                    {/* Recent Sources */}
-                    <div>
-                      <div className="font-medium text-emerald-700 mb-1">📄 Recent Sources Used</div>
-                      {conversation
-                        .filter(msg => msg.relevantChunks && msg.relevantChunks.length > 0)
-                        .slice(-3)
-                        .map((msg, index) => (
-                          <div key={index} className="mb-2">
-                            <div className="text-xs text-emerald-600 font-medium">
-                              Query: {msg.content?.substring(0, 50)}...
-                            </div>
-                            {msg.relevantChunks.slice(0, 3).map((chunk, chunkIndex) => (
-                              <motion.div
-                                key={chunkIndex}
-                                className="flex items-center space-x-2 py-1 hover:bg-emerald-50 rounded transition-colors ml-2"
-                                whileHover={{ scale: 1.01, x: 4 }}
-                              >
-                                <span className="text-sm">📄</span>
-                                <span className="text-xs text-emerald-700 flex-1 truncate">{chunk.sourceFile}</span>
-                                <span className="text-xs text-emerald-500 bg-emerald-100 px-1 rounded">
-                                  {(chunk.similarity * 100).toFixed(1)}%
-                                </span>
-                              </motion.div>
-                            ))}
-                          </div>
-                        ))}
+                {/* Enhanced Repository Info */}
+                {connectedVectorData && connectedVectorData.vectors.length > 0 && (
+                  <div className="bg-blue-100 p-3 rounded-lg text-xs">
+                    <div className="font-medium text-blue-800 mb-2">Repository Knowledge Base:</div>
+                    <div className="text-blue-700 space-y-1">
+                      <div>📚 Vectors: {connectedVectorData.vectors.length}</div>
+                      <div>🤖 Model: {connectedVectorData.repositoryInfo?.embeddingModel || 'Unknown'}</div>
+                      <div>📐 Dimensions: {connectedVectorData.repositoryInfo?.dimensions || 'Unknown'}</div>
+                      <div>📝 Content Size: {Math.round((connectedVectorData.processedContent?.length || 0) / 1000)}K chars</div>
+                      {connectedVectorData.structuredKnowledge && (
+                        <div>📁 Files: {new Set(connectedVectorData.structuredKnowledge.map(s => s.filename)).size}</div>
+                      )}
                     </div>
-                  </motion.div>
+                  </div>
                 )}
-              </AnimatePresence>
+
+                {/* Connection Debug Info */}
+                {connectedApiConfig && (
+                  <div className="bg-gray-100 p-2 rounded text-xs">
+                    <div className="font-medium text-gray-700 mb-1">Connection Info:</div>
+                    <div>Provider: {connectedApiConfig.provider}</div>
+                    <div>Connected: {connectedApiConfig.isConnected ? 'Yes' : 'No'}</div>
+                    <div>Models: {availableModels.length}</div>
+                  </div>
+                )}
+
+                {/* No Connection Warning */}
+                {!connectedApiConfig && (
+                  <div className="bg-yellow-100 p-2 rounded text-xs">
+                    <div className="font-medium text-yellow-800 mb-1">No API Connection:</div>
+                    <div className="text-yellow-700">
+                      Connect an API Configuration node to the purple handle (api-config) to enable chat functionality.
+                    </div>
+                  </div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
+    </div>
+  );
+};
 
-            {/* **FIXED: Output Handle** */}
-            <Handle
-              type="source"
-              position={Position.Right}
-              id="output"
-              style={{
-                background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-                width: '16px',
-                height: '16px',
-                border: '3px solid white',
-                borderRadius: '50%',
-                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-                right: '-8px'
-              }}
-              isConnectable={isConnectable}
-            />
-          </motion.div>
-        );
-      };
-
-      export default ChatNode;
-      
+export default ChatNode;

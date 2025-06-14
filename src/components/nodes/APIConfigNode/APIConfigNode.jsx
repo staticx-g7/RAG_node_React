@@ -1,504 +1,380 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../../ui/PlayButton';
 
-// Simplified Background Beams
 const BackgroundBeams = ({ className }) => (
-  <div className={`absolute inset-0 pointer-events-none ${className}`}>
-    <svg className="absolute inset-0 h-full w-full opacity-20" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="api-beams" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M0 40L40 0H20L0 20M40 40V20L20 40" stroke="rgba(156, 163, 175, 0.1)" fill="none" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#api-beams)" />
-    </svg>
+  <div className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-blue-50/20 via-cyan-50/20 to-teal-50/20" />
+    <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-blue-200/30 to-transparent" />
+    <div className="absolute top-1/4 left-0 w-full h-px bg-gradient-to-r from-transparent via-cyan-200/30 to-transparent" />
   </div>
 );
 
-// Floating icon animation
-const FloatingIcon = ({ children, isProcessing }) => (
-  <motion.div
-    animate={{
-      y: [0, -2, 0],
-      rotate: isProcessing ? 360 : 0,
-    }}
-    transition={{
-      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-      rotate: { duration: isProcessing ? 2 : 0, repeat: isProcessing ? Infinity : 0, ease: "linear" }
-    }}
-  >
-    {children}
-  </motion.div>
-);
-
-const APIConfigNode = ({ id, data, isConnectable, selected }) => {
-  const [apiKey, setApiKey] = useState(data?.apiKey || '');
-  const [apiEndpoint, setApiEndpoint] = useState(data?.apiEndpoint || 'https://api.openai.com/v1');
-  const [availableModels, setAvailableModels] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+const APIConfigNode = ({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow();
+  const [showSettings, setShowSettings] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [availableModels, setAvailableModels] = useState([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const updateTimeoutRef = useRef(null);
+  // API Configuration Settings
+  const [settings, setSettings] = useState({
+    provider: data.provider || 'custom',
+    endpoint: data.endpoint || '',
+    apiKey: data.apiKey || '',
+    token: data.token || '',
+    headers: data.headers || {},
+    additionalParams: data.additionalParams || {},
+    isConnected: data.isConnected || false,
+    availableModels: data.availableModels || [],
+  });
 
-  // **CHAIN REACTION FUNCTIONALITY**
-  const triggerNextNodes = useCallback(async (currentNodeId) => {
-    const edges = getEdges();
-    const nodes = getNodes();
+  // Provider configurations
+  const providers = {
+    openai: {
+      name: 'OpenAI',
+      icon: '🤖',
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      modelsEndpoint: 'https://api.openai.com/v1/models',
+      placeholder: 'sk-...',
+      keyLabel: 'API Key'
+    },
+    blablador: {
+      name: 'Blablador (JSC)',
+      icon: '🔬',
+      // FIXED: Use base endpoint, not chat completions endpoint
+      endpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1',
+      modelsEndpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1/models',
+      embeddingsEndpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1/embeddings',
+      requiresApiKey: true,
+      keyFormat: 'glpat-...',
+    },
+    anthropic: {
+      name: 'Anthropic',
+      icon: '🧠',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      modelsEndpoint: 'https://api.anthropic.com/v1/models',
+      placeholder: 'sk-ant-...',
+      keyLabel: 'API Key'
+    },
+    huggingface: {
+      name: 'Hugging Face',
+      icon: '🤗',
+      endpoint: 'https://api-inference.huggingface.co/models/',
+      modelsEndpoint: 'https://api-inference.huggingface.co/models',
+      placeholder: 'hf_...',
+      keyLabel: 'API Token'
+    },
+    custom: {
+      name: 'Custom API',
+      icon: '⚙️',
+      endpoint: '',
+      modelsEndpoint: '',
+      placeholder: 'Enter your API key...',
+      keyLabel: 'API Key'
+    }
+  };
 
-    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
+  // Update node data when settings change
+  useEffect(() => {
+    updateNodeData(id, {
+      ...settings,
+      lastUpdated: Date.now()
+    });
+  }, [settings, id, updateNodeData]);
 
-    if (outgoingEdges.length > 0) {
-      console.log(`🔗 APIConfigNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
+  // Handle setting changes with provider auto-detection
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
 
-      for (let i = 0; i < outgoingEdges.length; i++) {
-        const edge = outgoingEdges[i];
-        const targetNode = nodes.find(node => node.id === edge.target);
-
-        if (targetNode) {
-          console.log(`🎯 APIConfigNode: Triggering ${targetNode.type} node ${edge.target}`);
-
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('triggerExecution', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('autoExecute', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-          }, i * 500);
-        }
+    // Auto-detect provider based on endpoint
+    if (key === 'endpoint') {
+      if (value.includes('blablador') || value.includes('juelich')) {
+        newSettings.provider = 'blablador';
+      } else if (value.includes('openai.com')) {
+        newSettings.provider = 'openai';
+      } else if (value.includes('anthropic.com')) {
+        newSettings.provider = 'anthropic';
+      } else if (value.includes('huggingface.co')) {
+        newSettings.provider = 'huggingface';
+      } else if (value.trim() !== '') {
+        newSettings.provider = 'custom';
       }
     }
-  }, [getEdges, getNodes]);
 
-  // **FETCH AVAILABLE MODELS**
-  const fetchAvailableModels = useCallback(async () => {
-    if (!apiKey || !apiEndpoint) {
-      setError('Please provide API key and endpoint');
+    // Auto-fill endpoint when provider changes
+    if (key === 'provider' && providers[value]) {
+      newSettings.endpoint = providers[value].endpoint;
+    }
+
+    setSettings(newSettings);
+  };
+
+  // Test API connection
+  const testConnection = useCallback(async () => {
+    if (!settings.apiKey && !settings.token) {
+      setConnectionStatus('error');
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
-    setConnectionStatus('connecting');
+    setIsTestingConnection(true);
+    setConnectionStatus('testing');
 
     try {
-      console.log(`🔍 APIConfigNode ${id}: Testing connection to ${apiEndpoint}`);
+      const providerConfig = providers[settings.provider] || providers.custom;
+      let testEndpoint = providerConfig.modelsEndpoint || settings.endpoint;
 
-      const response = await fetch(`${apiEndpoint}/models`, {
+      // For custom endpoints, construct models endpoint
+      if (settings.provider === 'custom' && settings.endpoint) {
+        testEndpoint = settings.endpoint.replace('/chat/completions', '/models');
+      }
+
+      console.log('🧪 Testing connection to:', testEndpoint);
+
+      const headers = {
+        'Authorization': `Bearer ${settings.apiKey || settings.token}`,
+        'Content-Type': 'application/json',
+        ...settings.headers
+      };
+
+      const response = await fetch(testEndpoint, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        }
+        headers
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Connection test successful:', result);
+
+        // Extract models from response
+        let models = [];
+        if (result.data && Array.isArray(result.data)) {
+          models = result.data
+            .filter(model => model.id && !model.id.includes('whisper') && !model.id.includes('tts'))
+            .map(model => ({
+              id: model.id,
+              name: model.id,
+              object: model.object,
+              created: model.created,
+              owned_by: model.owned_by
+            }));
+        }
+
+        setAvailableModels(models);
+        setConnectionStatus('connected');
+
+        // Update settings with connection status and models
+        const connectedSettings = {
+          ...settings,
+          isConnected: true,
+          availableModels: models
+        };
+        setSettings(connectedSettings);
+
+      } else {
+        const errorText = await response.text();
+        console.error('❌ Connection test failed:', response.status, errorText);
+        setConnectionStatus('error');
+        setSettings(prev => ({ ...prev, isConnected: false, availableModels: [] }));
       }
-
-      const data = await response.json();
-      console.log(`✅ APIConfigNode ${id}: Successfully connected! Found ${data.data?.length || 0} models`);
-
-      setAvailableModels(data.data || []);
-      setConnectionStatus('connected');
-
-      // **TRIGGER CONNECTED NODES WITH API CONFIG**
-      await triggerNextNodes(id);
-
     } catch (error) {
-      console.error(`❌ APIConfigNode ${id}: Connection failed:`, error);
-      setError(`Connection failed: ${error.message}`);
+      console.error('❌ Connection test error:', error);
       setConnectionStatus('error');
-      setAvailableModels([]);
+      setSettings(prev => ({ ...prev, isConnected: false, availableModels: [] }));
     } finally {
-      setIsLoading(false);
+      setIsTestingConnection(false);
     }
-  }, [apiKey, apiEndpoint, id, triggerNextNodes]);
+  }, [settings]);
 
-  // **DEBOUNCED NODE DATA UPDATE**
-  useEffect(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
+  // Fetch models manually
+  const fetchModels = useCallback(async () => {
+    if (!settings.apiKey && !settings.token) {
+      console.log('❌ No API key for fetching models');
+      return;
     }
 
-    updateTimeoutRef.current = setTimeout(() => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                apiKey,
-                apiEndpoint,
-                availableModels,
-                connectionStatus,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-          }
-          return node;
-        })
-      );
-    }, 1000);
-
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, [apiKey, apiEndpoint, availableModels, connectionStatus, id, setNodes]);
-
-  // **NODE EXECUTION HANDLER**
-  const handleNodeExecution = useCallback(async () => {
-    console.log(`🎯 APIConfigNode ${id}: Executing API configuration test`);
-
-    if (apiKey && apiEndpoint) {
-      await fetchAvailableModels();
-    } else {
-      setError('Please provide API key and endpoint before testing');
+    setIsLoadingModels(true);
+    try {
+      await testConnection();
+    } finally {
+      setIsLoadingModels(false);
     }
-  }, [id, fetchAvailableModels, apiKey, apiEndpoint]);
+  }, [testConnection]);
 
-  const handleDelete = useCallback((e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  }, [id]);
-
-  const handleInteractionEvent = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
-
-  // **PRESET CONFIGURATIONS**
-  const presetConfigs = [
-    {
-      name: 'OpenAI',
-      endpoint: 'https://api.openai.com/v1',
-      icon: '🤖',
-      description: 'Official OpenAI API'
-    },
-    {
-      name: 'Blablador (Jülich)',
-      endpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1',
-      icon: '🏛️',
-      description: 'Helmholtz Foundation LLM'
-    },
-    {
-      name: 'Azure OpenAI',
-      endpoint: 'https://your-resource.openai.azure.com/openai/deployments/your-deployment',
-      icon: '☁️',
-      description: 'Azure OpenAI Service'
-    },
-    {
-      name: 'Local/Custom',
-      endpoint: 'http://localhost:8000/v1',
-      icon: '🏠',
-      description: 'Local or custom endpoint'
-    }
-  ];
-
-  const applyPreset = useCallback((preset) => {
-    setApiEndpoint(preset.endpoint);
-  }, []);
+  const currentProvider = providers[settings.provider] || providers.custom;
 
   return (
-    <motion.div
-      className={`relative w-80 bg-gradient-to-br from-cyan-50 via-teal-50 to-blue-50 border-2 border-cyan-200 rounded-xl shadow-lg group nowheel overflow-visible ${
-        selected ? 'ring-2 ring-cyan-300' : ''
-      }`}
-      style={{ minHeight: '500px' }}
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('input, button, select, .nowheel, .nodrag')) {
-          e.stopPropagation();
-        }
-      }}
-      whileHover={{
-        scale: 1.01,
-        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
-      }}
-    >
-      {/* Background Beams when loading */}
-      <AnimatePresence>
-        {isLoading && (
-          <BackgroundBeams className="opacity-20" />
-        )}
-      </AnimatePresence>
+    <div className="relative">
+      {/* Output Handle */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="output"
+        className="w-3 h-3 bg-green-400 border-2 border-white"
+        style={{ top: '20px' }}
+      />
 
-      {/* **FIXED: PlayButton positioning** */}
-      <div className="absolute -top-4 -left-4 z-30">
-        <PlayButton
-          nodeId={id}
-          nodeType="apiConfig"
-          onExecute={handleNodeExecution}
-          disabled={isLoading}
-        />
-      </div>
-
-      {/* **FIXED: Delete button positioning** */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+      <motion.div
+        className={`bg-white rounded-xl shadow-lg border-2 transition-all duration-300 overflow-hidden ${
+          selected ? 'border-blue-400 shadow-blue-100' : 'border-gray-200'
         }`}
-        title="Delete node"
-        whileHover={{ scale: 1.1, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
+        style={{ width: '280px', minHeight: '120px' }}
+        whileHover={{ scale: 1.02 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
       >
-        ×
-      </motion.button>
+        <BackgroundBeams className="rounded-xl" />
 
-      <div className="p-4 pt-8 nowheel">
         {/* Header */}
-        <div className="flex items-center space-x-2 mb-4">
-          <FloatingIcon isProcessing={isLoading}>
-            <span className="text-xl">🔑</span>
-          </FloatingIcon>
-          <h3 className="text-sm font-semibold text-cyan-800">
-            API Configuration
-          </h3>
-        </div>
-
-        {/* Preset Configurations */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-cyan-700 mb-2 block">⚡ Quick Setup</label>
-          <div className="grid grid-cols-2 gap-2">
-            {presetConfigs.map((preset, index) => (
-              <motion.button
-                key={preset.name}
-                onClick={() => applyPreset(preset)}
-                onMouseDown={handleInteractionEvent}
-                className="p-2 text-xs bg-gradient-to-r from-cyan-50 to-teal-50 hover:from-cyan-100 hover:to-teal-100 border border-cyan-200 rounded-lg transition-colors nodrag"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                title={preset.description}
+        <div className="relative z-10 p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-cyan-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">{currentProvider.icon}</span>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">API Configuration</h3>
+                <p className="text-xs text-gray-500">
+                  {currentProvider.name}
+                  {settings.isConnected && availableModels.length > 0 && (
+                    <span className="text-green-600"> • {availableModels.length} models</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+                title="Settings"
               >
-                <div className="flex flex-col items-center space-y-1">
-                  <span className="text-sm">{preset.icon}</span>
-                  <span className="font-medium text-cyan-800">{preset.name}</span>
-                </div>
-              </motion.button>
-            ))}
+                ⚙️
+              </button>
+              <button
+                onClick={testConnection}
+                disabled={isTestingConnection || (!settings.apiKey && !settings.token)}
+                className="w-6 h-6 flex items-center justify-center rounded bg-blue-100 hover:bg-blue-200 transition-colors disabled:opacity-50"
+                title="Test Connection"
+              >
+                {isTestingConnection ? '🔄' : '🔗'}
+              </button>
+            </div>
           </div>
         </div>
-
-        {/* API Endpoint */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-cyan-700 mb-2 block">🌐 API Endpoint</label>
-          <motion.input
-            type="text"
-            value={apiEndpoint}
-            onChange={(e) => setApiEndpoint(e.target.value)}
-            onMouseDown={handleInteractionEvent}
-            placeholder="https://api.openai.com/v1"
-            className="w-full p-2 text-xs border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 bg-gradient-to-r from-cyan-50 to-teal-50 text-cyan-800 nodrag"
-            whileFocus={{ scale: 1.01 }}
-          />
-        </div>
-
-        {/* API Key */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-cyan-700 mb-2 block">🔑 API Key</label>
-          <div className="relative">
-            <motion.input
-              type={showApiKey ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onMouseDown={handleInteractionEvent}
-              placeholder="Enter your API key"
-              className="w-full p-2 pr-8 text-xs border border-cyan-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 bg-gradient-to-r from-cyan-50 to-teal-50 text-cyan-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            />
-            <motion.button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-cyan-600 hover:text-cyan-800 nodrag"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              {showApiKey ? '🙈' : '👁️'}
-            </motion.button>
-          </div>
-        </div>
-
-        {/* Test Connection Button */}
-        <motion.button
-          onClick={fetchAvailableModels}
-          onMouseDown={handleInteractionEvent}
-          disabled={isLoading || !apiKey || !apiEndpoint}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
-            isLoading || !apiKey || !apiEndpoint
-              ? 'bg-cyan-200 text-cyan-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-cyan-500 to-teal-600 hover:from-cyan-600 hover:to-teal-700 text-white shadow-lg'
-          }`}
-          whileHover={{
-            scale: isLoading || !apiKey || !apiEndpoint ? 1 : 1.02,
-            boxShadow: isLoading || !apiKey || !apiEndpoint ? undefined : "0 8px 20px rgba(6, 182, 212, 0.3)"
-          }}
-          whileTap={{ scale: isLoading || !apiKey || !apiEndpoint ? 1 : 0.98 }}
-        >
-          <div className="flex items-center justify-center space-x-2">
-            {isLoading ? (
-              <>
-                <motion.div
-                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-                <span>Testing Connection...</span>
-              </>
-            ) : (
-              <>
-                <span>🔍</span>
-                <span>Test API Connection</span>
-              </>
-            )}
-          </div>
-        </motion.button>
 
         {/* Connection Status */}
-        <div className="mb-3">
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              connectionStatus === 'connected'
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : connectionStatus === 'error'
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : connectionStatus === 'connecting'
-                ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-                : 'bg-cyan-50 text-cyan-600 border border-cyan-200'
-            }`}
-          >
-            {connectionStatus === 'connected' && '✅ API Connected'}
-            {connectionStatus === 'error' && '❌ Connection Failed'}
-            {connectionStatus === 'connecting' && '🔄 Connecting...'}
-            {connectionStatus === 'disconnected' && '⏸️ Ready to Connect'}
+        <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+          <div className={`text-xs px-2 py-1 rounded-full text-center ${
+            connectionStatus === 'connected' ? 'bg-green-100 text-green-800' :
+            connectionStatus === 'testing' ? 'bg-yellow-100 text-yellow-800' :
+            connectionStatus === 'error' ? 'bg-red-100 text-red-800' :
+            'bg-gray-100 text-gray-600'
+          }`}>
+            {connectionStatus === 'connected' ? '✅ Connected' :
+             connectionStatus === 'testing' ? '🔄 Testing...' :
+             connectionStatus === 'error' ? '❌ Connection Failed' :
+             '⚪ Not Connected'}
           </div>
         </div>
 
-        {/* Error Display */}
+        {/* Settings Panel */}
         <AnimatePresence>
-          {error && (
+          {showSettings && (
             <motion.div
-              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-              initial={{ opacity: 0, y: -10, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="relative z-10 bg-gray-50/50"
             >
-              ❌ {error}
+              <div className="p-4 space-y-4">
+                {/* Provider Selection */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    API Provider
+                  </label>
+                  <select
+                    value={settings.provider}
+                    onChange={(e) => handleSettingChange('provider', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    <option value="openai">🤖 OpenAI</option>
+                    <option value="blablador">🔬 Blablador (JSC)</option>
+                    <option value="anthropic">🧠 Anthropic</option>
+                    <option value="huggingface">🤗 Hugging Face</option>
+                    <option value="custom">⚙️ Custom API</option>
+                  </select>
+                </div>
+
+                {/* API Endpoint */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    API Endpoint
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.endpoint}
+                    onChange={(e) => handleSettingChange('endpoint', e.target.value)}
+                    placeholder={currentProvider.endpoint || 'https://api.example.com/v1/chat/completions'}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    {currentProvider.keyLabel}
+                  </label>
+                  <input
+                    type="password"
+                    value={settings.apiKey}
+                    onChange={(e) => handleSettingChange('apiKey', e.target.value)}
+                    placeholder={currentProvider.placeholder}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
+                {/* Test Connection Button */}
+                <button
+                  onClick={testConnection}
+                  disabled={isTestingConnection || (!settings.apiKey && !settings.token)}
+                  className="w-full px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isTestingConnection ? 'Testing Connection...' : 'Test API Connection'}
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Available Models */}
-        <AnimatePresence>
-          {availableModels.length > 0 && (
-            <motion.div
-              className="text-xs bg-white border border-cyan-200 rounded-lg overflow-hidden shadow-lg nowheel"
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              onMouseDown={handleInteractionEvent}
-            >
-              <motion.div
-                className="bg-gradient-to-r from-cyan-50 to-teal-50 p-3 cursor-pointer hover:from-cyan-100 hover:to-teal-100 transition-all duration-300 nodrag"
-                onClick={() => setIsExpanded(!isExpanded)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
+        {availableModels.length > 0 && (
+          <div className="relative z-10 p-4 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-medium text-gray-700">Available Models</h4>
+              <button
+                onClick={fetchModels}
+                disabled={isLoadingModels}
+                className="text-xs text-blue-600 hover:text-blue-800"
               >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-cyan-800">
-                    🤖 Available Models
-                  </div>
-                  <motion.span
-                    animate={{ rotate: isExpanded ? 180 : 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                    className="text-cyan-600"
-                  >
-                    ▼
-                  </motion.span>
+                {isLoadingModels ? '🔄' : '🔍'}
+              </button>
+            </div>
+            <div className="max-h-32 overflow-y-auto space-y-1">
+              {availableModels.slice(0, 5).map((model, index) => (
+                <div key={index} className="text-xs text-gray-600 bg-white px-2 py-1 rounded border">
+                  {model.name || model.id}
                 </div>
-                <div className="text-cyan-700 text-xs mt-1">
-                  {availableModels.length} models available
+              ))}
+              {availableModels.length > 5 && (
+                <div className="text-xs text-gray-500 text-center">
+                  +{availableModels.length - 5} more models
                 </div>
-              </motion.div>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onMouseDown={handleInteractionEvent}
-                  >
-                    {availableModels.slice(0, 20).map((model, index) => (
-                      <motion.div
-                        key={model.id}
-                        className="flex items-center space-x-2 py-1 hover:bg-cyan-50 rounded transition-colors"
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.02 }}
-                        whileHover={{ scale: 1.01, x: 4 }}
-                      >
-                        <span className="text-sm">
-                          {model.id.includes('embedding') || model.id.includes('embed') ? '🔮' :
-                           model.id.includes('gpt') || model.id.includes('chat') ? '💬' : '🤖'}
-                        </span>
-                        <span className="text-xs text-cyan-700 flex-1 truncate">{model.id}</span>
-                        {model.owned_by && (
-                          <span className="text-xs text-cyan-500 bg-cyan-100 px-1 rounded">
-                            {model.owned_by}
-                          </span>
-                        )}
-                      </motion.div>
-                    ))}
-                    {availableModels.length > 20 && (
-                      <div className="text-xs text-cyan-500 text-center py-1">
-                        ...and {availableModels.length - 20} more models
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* **FIXED: Output Handle** */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{
-          background: 'linear-gradient(45deg, #06b6d4, #0891b2)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(6, 182, 212, 0.4)',
-          right: '-8px'
-        }}
-        isConnectable={isConnectable}
-      />
-    </motion.div>
+              )}
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 };
 

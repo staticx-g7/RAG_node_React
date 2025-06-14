@@ -94,7 +94,7 @@ const ControlTab = () => {
 
   const controlNodes = [
     {
-      type: 'execute',
+      type: 'executeNode',
       label: 'Execute Node',
       icon: '▶️',
       color: 'bg-gradient-to-r from-purple-50 to-violet-50 border-purple-200 text-purple-800',
@@ -182,21 +182,21 @@ const DataSourcesTab = () => {
 
   const dataSourceNodes = [
     {
-      type: 'apinode',
+      type: 'apiConfigNode',
       label: 'API Configuration',
       icon: '🔑',
       color: 'bg-gradient-to-r from-cyan-50 to-teal-50 border-cyan-200 text-cyan-800',
       description: 'Configure API credentials for LLM services'
     },
     {
-      type: 'git',
+      type: 'gitNode',
       label: 'Git Repository',
       icon: '🐙',
       color: 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200 text-amber-800',
       description: 'Fetch repository contents from GitHub/GitLab'
     },
     {
-      type: 'text',
+      type: 'textNode',
       label: 'Text Input',
       icon: '📝',
       color: 'bg-gradient-to-r from-blue-50 to-sky-50 border-blue-200 text-blue-800',
@@ -284,35 +284,35 @@ const ProcessingTab = () => {
 
   const processingNodes = [
     {
-      type: 'filter',
+      type: 'filterNode',
       label: 'Smart Filter',
       icon: '🔍',
       color: 'bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200 text-indigo-800',
       description: 'Filter repository files and folders intelligently'
     },
     {
-      type: 'parsenode',
+      type: 'parseNode',
       label: 'File Parser',
       icon: '🔧',
       color: 'bg-gradient-to-r from-slate-50 to-stone-50 border-slate-200 text-slate-800',
       description: 'Parse and extract content from various file formats'
     },
     {
-      type: 'chunknode',
+      type: 'chunkNode',
       label: 'Universal Chunker',
       icon: '🧩',
       color: 'bg-gradient-to-r from-rose-50 to-pink-50 border-rose-200 text-rose-800',
       description: 'Chunk content for RAG and LLM processing'
     },
     {
-      type: 'vectorizenode',
+      type: 'vectorizeNode',
       label: 'Vector Embeddings',
       icon: '🔮',
       color: 'bg-gradient-to-r from-purple-50 to-violet-50 border-purple-200 text-purple-800',
       description: 'Generate vector embeddings for semantic search'
     },
     {
-      type: 'chatnode',
+      type: 'chatNode',
       label: 'RAG Chat Query',
       icon: '💬',
       color: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-green-800',

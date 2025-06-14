@@ -1,13 +1,16 @@
-import {
-  ExecuteNode,
-  TextNode,
-  GitNode,
-  FilterNode,
-  ParseNode,
-  ChunkNode
-} from '../components/nodes';
+// src/constants/flowconfig.js
+import React from 'react';
+import ExecuteNode from '../components/nodes/ExecuteNode';
+import TextNode from '../components/nodes/TextNode';
+import GitNode from '../components/nodes/GitNode';
+import FilterNode from '../components/nodes/FilterNode';
+import ParseNode from '../components/nodes/ParseNode';
+import ChunkNode from '../components/nodes/ChunkNode';
+import APIConfigNode from '../components/nodes/APIConfigNode';
+import VectorizeNode from '../components/nodes/VectorizeNode';
+import ChatNode from '../components/nodes/ChatNode';
 
-// **CUSTOM NODE TYPES FOR YOUR WORKFLOW AUTOMATION SYSTEM**
+// Node type definitions with enhanced compatibility
 export const nodeTypes = {
   executeNode: ExecuteNode,
   textNode: TextNode,
@@ -15,16 +18,215 @@ export const nodeTypes = {
   filterNode: FilterNode,
   parseNode: ParseNode,
   chunkNode: ChunkNode,
+  apiConfigNode: APIConfigNode,
+  vectorizeNode: VectorizeNode,
+  chatNode: ChatNode,
 };
 
-// **INITIAL WORKFLOW SETUP - RAG PIPELINE EXAMPLE**
+// Universal data format standards for cross-node compatibility
+export const NODE_DATA_FORMATS = {
+  // Standard field names for different data types
+  FILES: ['files', 'filteredFiles', 'repositoryFiles', 'selectedFiles', 'processedFiles', 'fetchedFiles', 'output'],
+  CONTENT: ['content', 'text', 'parsedContent', 'extractedText', 'fileContent', 'output', 'repositoryContent', 'filteredContent'],
+  CHUNKS: ['chunks', 'processedChunks', 'textChunks', 'outputChunks'],
+  VECTORS: ['vectors', 'embeddings', 'vectorData', 'vectorizationResults'],
+  API_CONFIG: ['apiConfig', 'configuration', 'settings'],
+
+  // Helper function to extract data with fallbacks
+  extractData: (nodeData, dataType) => {
+    if (!nodeData) return dataType === 'FILES' || dataType === 'CHUNKS' || dataType === 'VECTORS' ? [] : '';
+
+    const fieldNames = NODE_DATA_FORMATS[dataType] || [];
+    for (const fieldName of fieldNames) {
+      if (nodeData[fieldName] !== undefined && nodeData[fieldName] !== null) {
+        return nodeData[fieldName];
+      }
+    }
+    return dataType === 'FILES' || dataType === 'CHUNKS' || dataType === 'VECTORS' ? [] : '';
+  },
+
+  // Validate data compatibility between nodes
+  validateConnection: (sourceNode, targetNode, dataType) => {
+    const sourceData = NODE_DATA_FORMATS.extractData(sourceNode.data, dataType);
+    return sourceData && (Array.isArray(sourceData) ? sourceData.length > 0 : sourceData.length > 0);
+  }
+};
+
+// API Provider configurations
+export const API_PROVIDERS = {
+  openai: {
+    name: 'OpenAI',
+    icon: '🤖',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    modelsEndpoint: 'https://api.openai.com/v1/models',
+    embeddingsEndpoint: 'https://api.openai.com/v1/embeddings',
+    requiresApiKey: true,
+    keyFormat: 'sk-...',
+    supportedModels: ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', 'gpt-4o'],
+    embeddingModels: ['text-embedding-ada-002', 'text-embedding-3-small', 'text-embedding-3-large']
+  },
+  blablador: {
+    name: 'Blablador (JSC)',
+    icon: '🔬',
+    // FIXED: Use base endpoint, not chat completions endpoint
+    endpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1',
+    modelsEndpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1/models',
+    embeddingsEndpoint: 'https://api.helmholtz-blablador.fz-juelich.de/v1/embeddings',
+    requiresApiKey: true,
+    keyFormat: 'glpat-...',
+  },
+  anthropic: {
+    name: 'Anthropic',
+    icon: '🧠',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    modelsEndpoint: 'https://api.anthropic.com/v1/models',
+    requiresApiKey: true,
+    keyFormat: 'sk-ant-...',
+    supportedModels: ['claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
+    embeddingModels: []
+  },
+  huggingface: {
+    name: 'Hugging Face',
+    icon: '🤗',
+    endpoint: 'https://api-inference.huggingface.co/models/',
+    requiresApiKey: true,
+    keyFormat: 'hf_...',
+    supportedModels: ['microsoft/DialoGPT-large', 'facebook/blenderbot-400M-distill'],
+    embeddingModels: ['sentence-transformers/all-MiniLM-L6-v2']
+  },
+  custom: {
+    name: 'Custom API',
+    icon: '⚙️',
+    endpoint: '',
+    modelsEndpoint: '',
+    embeddingsEndpoint: '',
+    requiresApiKey: true,
+    keyFormat: 'custom',
+    supportedModels: [],
+    embeddingModels: []
+  }
+};
+
+// File format configurations
+export const FILE_FORMATS = {
+  text: {
+    extensions: ['txt', 'md', 'markdown'],
+    icon: '📝',
+    color: 'text-blue-600',
+    parser: 'text'
+  },
+  code: {
+    extensions: ['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'cs', 'php', 'rb', 'go', 'rs'],
+    icon: '💻',
+    color: 'text-green-600',
+    parser: 'code'
+  },
+  data: {
+    extensions: ['json', 'xml', 'yaml', 'yml', 'csv', 'toml'],
+    icon: '📊',
+    color: 'text-purple-600',
+    parser: 'structured'
+  },
+  web: {
+    extensions: ['html', 'htm', 'css', 'scss', 'sass', 'less'],
+    icon: '🌐',
+    color: 'text-orange-600',
+    parser: 'web'
+  },
+  document: {
+    extensions: ['pdf', 'doc', 'docx', 'rtf'],
+    icon: '📄',
+    color: 'text-red-600',
+    parser: 'document'
+  }
+};
+
+// Chunking strategies
+export const CHUNKING_STRATEGIES = {
+  recursive: {
+    name: 'Recursive Text Splitter',
+    description: 'Splits text recursively using multiple separators',
+    icon: '🔄',
+    separators: ['\n\n', '\n', '. ', ' ', ''],
+    preserveStructure: true
+  },
+  character: {
+    name: 'Character Splitter',
+    description: 'Splits text by fixed character count',
+    icon: '📏',
+    preserveStructure: false
+  },
+  token: {
+    name: 'Token Splitter',
+    description: 'Splits text by token count (words)',
+    icon: '🔤',
+    preserveStructure: false
+  },
+  semantic: {
+    name: 'Semantic Splitter',
+    description: 'Splits text by semantic boundaries (paragraphs)',
+    icon: '🧠',
+    preserveStructure: true
+  },
+  structure: {
+    name: 'Structure-Aware Splitter',
+    description: 'Respects document structure (sentences, paragraphs)',
+    icon: '🏗️',
+    preserveStructure: true
+  }
+};
+
+// Vector store configurations
+export const VECTOR_STORES = {
+  memory: {
+    name: 'In-Memory',
+    icon: '💾',
+    description: 'Store vectors in memory (temporary)',
+    persistent: false
+  },
+  pinecone: {
+    name: 'Pinecone',
+    icon: '🌲',
+    description: 'Pinecone vector database',
+    persistent: true,
+    requiresApiKey: true
+  },
+  weaviate: {
+    name: 'Weaviate',
+    icon: '🕸️',
+    description: 'Weaviate vector database',
+    persistent: true,
+    requiresApiKey: false
+  },
+  chroma: {
+    name: 'ChromaDB',
+    icon: '🎨',
+    description: 'Chroma vector database',
+    persistent: true,
+    requiresApiKey: false
+  },
+  redis: {
+    name: 'Redis',
+    icon: '🔴',
+    description: 'Redis vector search',
+    persistent: true,
+    requiresApiKey: false
+  }
+};
+
+// Initial nodes for the flow
 export const INITIAL_NODES = [
   {
-    id: 'execute-1',
-    type: 'executeNode',
+    id: 'api-config-1',
+    type: 'apiConfigNode',
     data: {
-      label: 'Execute Workflow',
-      description: 'Start your RAG pipeline'
+      label: 'API Configuration',
+      description: 'Configure AI API settings',
+      provider: 'custom',
+      endpoint: '',
+      apiKey: '',
+      isConnected: false,
+      availableModels: []
     },
     position: { x: 100, y: 100 },
   },
@@ -33,330 +235,300 @@ export const INITIAL_NODES = [
     type: 'gitNode',
     data: {
       label: 'Git Repository',
+      description: 'Fetch repository data',
       platform: 'github',
-      description: 'Fetch repository data'
+      repository: '',
+      branch: 'main',
+      files: [],
+      repositoryFiles: [],
+      content: '',
+      repositoryContent: ''
     },
-    position: { x: 400, y: 100 },
+    position: { x: 100, y: 250 },
   },
   {
-    id: 'filter-1',
-    type: 'filterNode',
+    id: 'chat-1',
+    type: 'chatNode',
     data: {
-      label: 'Smart Filter',
-      description: 'Filter files for processing'
+      label: 'AI Chat',
+      description: 'Chat with AI models',
+      model: 'gpt-3.5-turbo',
+      messages: [],
+      isExpanded: false,
+      connectedApiConfig: null
     },
     position: { x: 700, y: 100 },
   },
-  {
-    id: 'parse-1',
-    type: 'parseNode',
-    data: {
-      label: 'Parse Files',
-      description: 'Extract content from files'
-    },
-    position: { x: 1000, y: 100 },
-  },
-  {
-    id: 'chunk-1',
-    type: 'chunkNode',
-    data: {
-      label: 'Universal Chunker',
-      description: 'Chunk content for RAG'
-    },
-    position: { x: 1300, y: 100 },
-  },
 ];
 
-// **INITIAL CONNECTIONS FOR RAG WORKFLOW**
-export const INITIAL_EDGES = [
-  {
-    id: 'e-execute-git',
-    source: 'execute-1',
-    target: 'git-1',
-    type: 'smoothstep',
-    animated: true,
-    style: { stroke: '#f59e0b', strokeWidth: 2 },
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#f59e0b',
-    }
-  },
-  {
-    id: 'e-git-filter',
-    source: 'git-1',
-    target: 'filter-1',
-    type: 'smoothstep',
-    animated: true,
-    style: { stroke: '#6366f1', strokeWidth: 2 },
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#6366f1',
-    }
-  },
-  {
-    id: 'e-filter-parse',
-    source: 'filter-1',
-    target: 'parse-1',
-    type: 'smoothstep',
-    animated: true,
-    style: { stroke: '#8b5cf6', strokeWidth: 2 },
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#8b5cf6',
-    }
-  },
-  {
-    id: 'e-parse-chunk',
-    source: 'parse-1',
-    target: 'chunk-1',
-    type: 'smoothstep',
-    animated: true,
-    style: { stroke: '#10b981', strokeWidth: 2 },
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#10b981',
-    }
-  },
-];
+// Initial edges for the flow
+export const INITIAL_EDGES = [];
 
-// **NODE CATEGORIES FOR SIDEBAR ORGANIZATION**
-export const NODE_CATEGORIES = {
-  CONTROL: 'Control',
-  DATA: 'Data Sources',
-  PROCESSING: 'Processing',
-  OUTPUT: 'Output',
-  UTILITY: 'Utility'
-};
-
-// **AVAILABLE NODES FOR DRAG & DROP SIDEBAR**
-export const AVAILABLE_NODES = [
-  // Control Nodes
-  {
-    type: 'executeNode',
-    label: 'Execute',
-    icon: '▶️',
-    category: NODE_CATEGORIES.CONTROL,
-    description: 'Start workflow execution',
-    color: '#ef4444'
-  },
-
-  // Data Source Nodes
-  {
-    type: 'gitNode',
-    label: 'Git Repository',
-    icon: '🐙',
-    category: NODE_CATEGORIES.DATA,
-    description: 'Fetch from GitHub/GitLab',
-    color: '#f59e0b'
-  },
-
-  // Processing Nodes
-  {
-    type: 'filterNode',
-    label: 'Smart Filter',
-    icon: '🔍',
-    category: NODE_CATEGORIES.PROCESSING,
-    description: 'Filter files and folders',
-    color: '#6366f1'
-  },
-  {
-    type: 'parseNode',
-    label: 'Parse Files',
-    icon: '🔧',
-    category: NODE_CATEGORIES.PROCESSING,
-    description: 'Extract content from files',
-    color: '#8b5cf6'
-  },
-  {
-    type: 'chunkNode',
-    label: 'Universal Chunker',
-    icon: '🧩',
-    category: NODE_CATEGORIES.PROCESSING,
-    description: 'Chunk content for RAG',
-    color: '#10b981'
-  },
-
-  // Utility Nodes
-  {
-    type: 'textNode',
-    label: 'Text Node',
-    icon: '📝',
-    category: NODE_CATEGORIES.UTILITY,
-    description: 'Display or edit text',
-    color: '#6b7280'
-  },
-];
-
-// **WORKFLOW TEMPLATES**
-export const WORKFLOW_TEMPLATES = {
-  RAG_PIPELINE: {
-    name: 'RAG Pipeline',
-    description: 'Complete RAG workflow from Git to Chunks',
-    nodes: INITIAL_NODES,
-    edges: INITIAL_EDGES
-  },
-  SIMPLE_PROCESSING: {
-    name: 'Simple Processing',
-    description: 'Basic file processing workflow',
-    nodes: [
-      {
-        id: 'git-simple',
-        type: 'gitNode',
-        data: { label: 'Git Repository' },
-        position: { x: 200, y: 100 },
-      },
-      {
-        id: 'parse-simple',
-        type: 'parseNode',
-        data: { label: 'Parse Files' },
-        position: { x: 500, y: 100 },
-      },
-    ],
-    edges: [
-      {
-        id: 'e-simple',
-        source: 'git-simple',
-        target: 'parse-simple',
-        type: 'smoothstep',
-        animated: true,
-      }
-    ]
-  }
-};
-
-// **ENHANCED FLOW CONFIGURATION**
+// Flow configuration
 export const FLOW_CONFIG = {
-  // View and positioning
-  fitViewOptions: {
-    padding: 0.3,
-    includeHiddenNodes: false,
-    minZoom: 0.1,
-    maxZoom: 2
-  },
-  nodeOrigin: [0.5, 0.5], // Center origin for better handle positioning
-
-  // Grid and snapping
-  snapToGrid: true,
-  snapGrid: [20, 20],
-
-  // Background styling
-  backgroundVariant: 'dots', // Changed to dots for better visual appeal
-  backgroundGap: 20,
-  backgroundSize: 1,
-  backgroundColor: '#fafafa',
-
-  // Interaction settings
   nodesDraggable: true,
   nodesConnectable: true,
   elementsSelectable: true,
-  selectNodesOnDrag: false,
+  snapToGrid: true,
+  snapGrid: [15, 15],
+  defaultViewport: { x: 0, y: 0, zoom: 1 },
+  minZoom: 0.2,
+  maxZoom: 2,
+  attributionPosition: 'bottom-left',
 
-  // Connection settings
-  connectionMode: 'strict', // Only allow valid connections
-  connectionLineType: 'smoothstep',
+  // Enhanced connection validation
+  isValidConnection: (connection) => {
+    console.log('🔗 Validating connection:', connection);
+
+    // Prevent self-connections
+    if (connection.source === connection.target) {
+      console.log('❌ Self-connection not allowed');
+      return false;
+    }
+
+    // Define valid connection patterns
+    const validConnections = {
+      gitNode: ['filterNode', 'parseNode', 'chunkNode'],
+      filterNode: ['parseNode', 'chunkNode'],
+      parseNode: ['chunkNode'],
+      chunkNode: ['vectorizeNode'],
+      vectorizeNode: ['chatNode'],
+      apiConfigNode: ['chatNode', 'vectorizeNode'],
+      textNode: ['filterNode', 'parseNode', 'chunkNode'],
+      executeNode: ['gitNode', 'filterNode', 'parseNode', 'chunkNode', 'vectorizeNode', 'chatNode']
+    };
+
+    // Get source and target node types (this would need to be implemented with actual node lookup)
+    // For now, allow all connections
+    return true;
+  },
+
+  // Connection line styling
   connectionLineStyle: {
-    stroke: '#94a3b8',
-    strokeWidth: 2,
-    strokeDasharray: '5,5'
+    stroke: '#3b82f6',
+    strokeWidth: 3,
+    strokeDasharray: '8,8'
   },
 
   // Default edge options
   defaultEdgeOptions: {
     type: 'smoothstep',
-    animated: false,
+    animated: true,
     style: {
-      stroke: '#94a3b8',
+      stroke: '#6b7280',
       strokeWidth: 2
     },
     markerEnd: {
       type: 'arrowclosed',
-      color: '#94a3b8',
+      color: '#6b7280',
+    },
+  },
+};
+
+// Node categories for the sidebar
+export const NODE_CATEGORIES = {
+  control: {
+    name: 'Control',
+    icon: '⚡',
+    color: 'purple',
+    nodes: [
+      {
+        type: 'executeNode',
+        label: 'Execute Node',
+        icon: '▶️',
+        description: 'Start workflow execution and trigger connected nodes'
+      }
+    ]
+  },
+  dataSources: {
+    name: 'Data Sources',
+    icon: '📁',
+    color: 'blue',
+    nodes: [
+      {
+        type: 'apiConfigNode',
+        label: 'API Configuration',
+        icon: '🔑',
+        description: 'Configure API credentials for LLM services'
+      },
+      {
+        type: 'gitNode',
+        label: 'Git Repository',
+        icon: '🐙',
+        description: 'Fetch repository contents from GitHub/GitLab'
+      },
+      {
+        type: 'textNode',
+        label: 'Text Input',
+        icon: '📝',
+        description: 'Provide manual text input or display data'
+      }
+    ]
+  },
+  processing: {
+    name: 'Processing',
+    icon: '⚙️',
+    color: 'green',
+    nodes: [
+      {
+        type: 'filterNode',
+        label: 'Smart Filter',
+        icon: '🔍',
+        description: 'Filter repository files and folders intelligently'
+      },
+      {
+        type: 'parseNode',
+        label: 'File Parser',
+        icon: '🔧',
+        description: 'Parse and extract content from various file formats'
+      },
+      {
+        type: 'chunkNode',
+        label: 'Universal Chunker',
+        icon: '🧩',
+        description: 'Chunk content for RAG and LLM processing'
+      },
+      {
+        type: 'vectorizeNode',
+        label: 'Vector Embeddings',
+        icon: '🔮',
+        description: 'Generate vector embeddings for semantic search'
+      },
+      {
+        type: 'chatNode',
+        label: 'RAG Chat Query',
+        icon: '💬',
+        description: 'Query your knowledge base with intelligent conversation'
+      }
+    ]
+  }
+};
+
+// Workflow templates
+export const WORKFLOW_TEMPLATES = {
+  basicRAG: {
+    name: 'Basic RAG Pipeline',
+    description: 'Complete RAG workflow from repository to chat',
+    nodes: [
+      { type: 'apiConfigNode', position: { x: 100, y: 100 } },
+      { type: 'gitNode', position: { x: 100, y: 250 } },
+      { type: 'filterNode', position: { x: 300, y: 250 } },
+      { type: 'parseNode', position: { x: 500, y: 250 } },
+      { type: 'chunkNode', position: { x: 700, y: 250 } },
+      { type: 'vectorizeNode', position: { x: 900, y: 250 } },
+      { type: 'chatNode', position: { x: 700, y: 100 } }
+    ],
+    edges: [
+      { source: 'gitNode', target: 'filterNode' },
+      { source: 'filterNode', target: 'parseNode' },
+      { source: 'parseNode', target: 'chunkNode' },
+      { source: 'chunkNode', target: 'vectorizeNode' },
+      { source: 'apiConfigNode', target: 'chatNode' },
+      { source: 'apiConfigNode', target: 'vectorizeNode' }
+    ]
+  },
+  simpleChat: {
+    name: 'Simple Chat',
+    description: 'Basic chat setup with API configuration',
+    nodes: [
+      { type: 'apiConfigNode', position: { x: 100, y: 100 } },
+      { type: 'chatNode', position: { x: 400, y: 100 } }
+    ],
+    edges: [
+      { source: 'apiConfigNode', target: 'chatNode' }
+    ]
+  },
+  documentProcessing: {
+    name: 'Document Processing',
+    description: 'Process and chunk documents without chat',
+    nodes: [
+      { type: 'gitNode', position: { x: 100, y: 100 } },
+      { type: 'filterNode', position: { x: 300, y: 100 } },
+      { type: 'parseNode', position: { x: 500, y: 100 } },
+      { type: 'chunkNode', position: { x: 700, y: 100 } }
+    ],
+    edges: [
+      { source: 'gitNode', target: 'filterNode' },
+      { source: 'filterNode', target: 'parseNode' },
+      { source: 'parseNode', target: 'chunkNode' }
+    ]
+  }
+};
+
+// Export utility functions
+export const FlowUtils = {
+  // Get node by ID
+  getNodeById: (nodes, id) => nodes.find(node => node.id === id),
+
+  // Get connected nodes
+  getConnectedNodes: (nodes, edges, nodeId, direction = 'target') => {
+    const connectedEdges = edges.filter(edge =>
+      direction === 'target' ? edge.source === nodeId : edge.target === nodeId
+    );
+    return connectedEdges.map(edge => {
+      const connectedNodeId = direction === 'target' ? edge.target : edge.source;
+      return nodes.find(node => node.id === connectedNodeId);
+    }).filter(Boolean);
+  },
+
+  // Validate workflow
+  validateWorkflow: (nodes, edges) => {
+    const errors = [];
+    const warnings = [];
+
+    // Check for isolated nodes
+    const connectedNodeIds = new Set();
+    edges.forEach(edge => {
+      connectedNodeIds.add(edge.source);
+      connectedNodeIds.add(edge.target);
+    });
+
+    nodes.forEach(node => {
+      if (!connectedNodeIds.has(node.id) && node.type !== 'textNode') {
+        warnings.push(`Node ${node.data.label} (${node.id}) is not connected`);
+      }
+    });
+
+    // Check for API configuration
+    const hasApiConfig = nodes.some(node => node.type === 'apiConfigNode');
+    const hasChatNode = nodes.some(node => node.type === 'chatNode');
+
+    if (hasChatNode && !hasApiConfig) {
+      errors.push('Chat node requires an API Configuration node');
     }
+
+    return { errors, warnings, isValid: errors.length === 0 };
   },
 
-  // Zoom and pan settings
-  zoomOnScroll: true,
-  zoomOnPinch: true,
-  panOnScroll: false,
-  panOnScrollSpeed: 0.5,
-  zoomOnDoubleClick: false,
+  // Generate workflow summary
+  getWorkflowSummary: (nodes, edges) => {
+    const nodeTypes = {};
+    nodes.forEach(node => {
+      nodeTypes[node.type] = (nodeTypes[node.type] || 0) + 1;
+    });
 
-  // Selection settings
-  multiSelectionKeyCode: 'Meta', // Cmd on Mac, Ctrl on Windows
-  deleteKeyCode: 'Delete',
-
-  // Auto-layout settings
-  autoLayout: {
-    direction: 'LR', // Left to Right
-    spacing: [300, 150], // [horizontal, vertical] spacing
+    return {
+      totalNodes: nodes.length,
+      totalEdges: edges.length,
+      nodeTypes,
+      hasRAGPipeline: nodes.some(n => n.type === 'vectorizeNode'),
+      hasChat: nodes.some(n => n.type === 'chatNode'),
+      hasApiConfig: nodes.some(n => n.type === 'apiConfigNode')
+    };
   }
 };
 
-// **NODE VALIDATION RULES**
-export const NODE_VALIDATION = {
-  // Maximum connections per node type
-  maxConnections: {
-    executeNode: { input: 0, output: 5 },
-    gitNode: { input: 1, output: 5 },
-    filterNode: { input: 1, output: 3 },
-    parseNode: { input: 1, output: 3 },
-    chunkNode: { input: 1, output: 3 },
-    textNode: { input: 3, output: 1 },
-  },
-
-  // Valid connection types
-  validConnections: {
-    executeNode: ['gitNode', 'textNode'],
-    gitNode: ['filterNode', 'parseNode'],
-    filterNode: ['parseNode'],
-    parseNode: ['chunkNode'],
-    chunkNode: ['textNode'], // Future: vectorizeNode
-    textNode: []
-  }
-};
-
-// **KEYBOARD SHORTCUTS**
-export const KEYBOARD_SHORTCUTS = {
-  DELETE_SELECTED: 'Delete',
-  SELECT_ALL: 'Meta+a',
-  COPY: 'Meta+c',
-  PASTE: 'Meta+v',
-  UNDO: 'Meta+z',
-  REDO: 'Meta+Shift+z',
-  FIT_VIEW: 'f',
-  ZOOM_IN: 'Meta+=',
-  ZOOM_OUT: 'Meta+-',
-  TOGGLE_CONSOLE: 'Meta+`', // For your floating console preference
-};
-
-// **ANIMATION SETTINGS FOR FRAMER MOTION**
-export const ANIMATION_CONFIG = {
-  nodeAppear: {
-    initial: { opacity: 0, scale: 0.8 },
-    animate: { opacity: 1, scale: 1 },
-    transition: { type: "spring", stiffness: 300, damping: 20 }
-  },
-  edgeAppear: {
-    initial: { pathLength: 0, opacity: 0 },
-    animate: { pathLength: 1, opacity: 1 },
-    transition: { duration: 0.5, ease: "easeInOut" }
-  },
-  nodeHover: {
-    whileHover: { scale: 1.02 },
-    transition: { type: "spring", stiffness: 400, damping: 10 }
-  }
-};
-
-// **EXPORT ALL CONFIGURATIONS**
 export default {
   nodeTypes,
+  NODE_DATA_FORMATS,
+  API_PROVIDERS,
+  FILE_FORMATS,
+  CHUNKING_STRATEGIES,
+  VECTOR_STORES,
   INITIAL_NODES,
   INITIAL_EDGES,
-  NODE_CATEGORIES,
-  AVAILABLE_NODES,
-  WORKFLOW_TEMPLATES,
   FLOW_CONFIG,
-  NODE_VALIDATION,
-  KEYBOARD_SHORTCUTS,
-  ANIMATION_CONFIG
+  NODE_CATEGORIES,
+  WORKFLOW_TEMPLATES,
+  FlowUtils
 };

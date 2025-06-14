@@ -1,904 +1,919 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../../ui/PlayButton';
 
-// Simplified Background Beams (fixed pointer events)
 const BackgroundBeams = ({ className }) => (
-  <div className={`absolute inset-0 pointer-events-none ${className}`}>
-    <svg
-      className="absolute inset-0 h-full w-full opacity-20"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <pattern
-          id="git-beams"
-          x="0"
-          y="0"
-          width="40"
-          height="40"
-          patternUnits="userSpaceOnUse"
-        >
-          <path
-            d="M0 40L40 0H20L0 20M40 40V20L20 40"
-            stroke="rgba(156, 163, 175, 0.1)"
-            fill="none"
-          />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#git-beams)" />
-    </svg>
+  <div className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-amber-50/20 via-orange-50/20 to-yellow-50/20" />
+    <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-amber-200/30 to-transparent" />
+    <div className="absolute top-1/4 left-0 w-full h-px bg-gradient-to-r from-transparent via-orange-200/30 to-transparent" />
   </div>
 );
 
-// Simplified floating icon (reduced animation)
-const FloatingIcon = ({ children, isProcessing }) => (
-  <motion.div
-    animate={{
-      y: [0, -2, 0],
-      rotate: isProcessing ? 360 : 0,
-    }}
-    transition={{
-      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-      rotate: {
-        duration: isProcessing ? 2 : 0,
-        repeat: isProcessing ? Infinity : 0,
-        ease: "linear"
-      }
-    }}
-  >
-    {children}
-  </motion.div>
-);
+const GitNode = ({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow();
 
-const GitNode = React.memo(({ id, data, isConnectable, selected }) => {
-  const [platform, setPlatform] = useState(data?.platform || 'github');
-  const [apiKey, setApiKey] = useState(data?.apiKey || '');
-  const [repoUrl, setRepoUrl] = useState(data?.repoUrl || '');
-  const [customEndpoint, setCustomEndpoint] = useState(data?.customEndpoint || '');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [repoData, setRepoData] = useState(null);
-  const [error, setError] = useState(null);
-  const [isFocused, setIsFocused] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState(new Set());
+  // State management
+  const [showSettings, setShowSettings] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [repositoryFiles, setRepositoryFiles] = useState([]);
+  const [repositoryContent, setRepositoryContent] = useState('');
+  const [availableBranches, setAvailableBranches] = useState([]);
+  const [availableExtensions, setAvailableExtensions] = useState([]);
+  const [repositoryInfo, setRepositoryInfo] = useState(null);
 
-  // **NEW: Branch-related state**
-  const [branches, setBranches] = useState(data?.branches || []);
-  const [selectedBranch, setSelectedBranch] = useState(data?.selectedBranch || '');
-  const [isFetchingBranches, setIsFetchingBranches] = useState(false);
+  // Git settings
+  const [settings, setSettings] = useState({
+    platform: data.platform || 'github',
+    repositoryUrl: data.repositoryUrl || '',
+    repository: data.repository || '',
+    branch: data.branch || 'main',
+    accessToken: data.accessToken || '',
+    includePrivate: data.includePrivate || false,
+    maxFiles: data.maxFiles || 100,
+    maxFileSize: data.maxFileSize || 5, // MB
+    includeExtensions: data.includeExtensions || [],
+    excludePatterns: data.excludePatterns || ['node_modules', '.git', 'dist', 'build', '.next'],
+    fetchContent: data.fetchContent !== false,
+    includeMetadata: data.includeMetadata !== false,
+    autoDetectPlatform: data.autoDetectPlatform !== false,
+  });
 
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const nodeRef = useRef(null);
-  const abortControllerRef = useRef(null);
-  const fetchButtonRef = useRef(null);
-  const updateTimeoutRef = useRef(null);
+  const [stats, setStats] = useState({
+    totalFiles: 0,
+    fetchedFiles: 0,
+    totalSize: 0,
+    processingTime: 0,
+    lastFetched: null,
+    errors: 0,
+    totalBranches: 0,
+    totalExtensions: 0,
+  });
 
-  // **CHAIN REACTION FUNCTIONALITY**
-  const triggerNextNodes = useCallback(async (currentNodeId) => {
-    const edges = getEdges();
-    const nodes = getNodes();
-
-    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
-
-    if (outgoingEdges.length > 0) {
-      console.log(`🔗 GitNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
-
-      for (let i = 0; i < outgoingEdges.length; i++) {
-        const edge = outgoingEdges[i];
-        const targetNode = nodes.find(node => node.id === edge.target);
-
-        if (targetNode) {
-          console.log(`🎯 GitNode: Triggering ${targetNode.type} node ${edge.target}`);
-
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('triggerExecution', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('autoExecute', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-          }, i * 500);
-        }
-      }
-    } else {
-      console.log(`⏹️ GitNode: No connected nodes found after fetching`);
-    }
-  }, [getEdges, getNodes]);
-
-  const getDefaultEndpoint = useCallback((platform) => {
-    switch (platform) {
-      case 'github': return 'https://api.github.com';
-      case 'gitlab': return 'https://gitlab.com/api/v4';
-      default: return '';
-    }
-  }, []);
-
-  const getApiEndpoint = useCallback(() => {
-    return customEndpoint || getDefaultEndpoint(platform);
-  }, [customEndpoint, platform, getDefaultEndpoint]);
-
-  const handleDelete = useCallback((e) => {
-    e.stopPropagation();
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  }, [id]);
-
-  const handleKeyDown = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
-
-  // **DEBOUNCED NODE DATA UPDATE** - Enhanced with branch data
+  // Update node data when settings or files change
   useEffect(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
+    updateNodeData(id, {
+      ...settings,
+      stats,
+      repositoryInfo,
+      availableBranches,
+      availableExtensions,
+
+      // Store data in multiple formats for FilterNode compatibility
+      repositoryFiles: repositoryFiles,
+      repositoryContent: repositoryContent,
+      files: repositoryFiles,
+      fetchedFiles: repositoryFiles,
+      output: repositoryFiles,
+      content: repositoryContent,
+      text: repositoryContent,
+      extractedText: repositoryContent,
+
+      lastUpdated: Date.now()
+    });
+  }, [settings, stats, repositoryFiles, repositoryContent, availableBranches, availableExtensions, repositoryInfo, id, updateNodeData]);
+
+  // Handle setting changes
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
+
+    // Auto-detect platform from URL
+    if (key === 'repositoryUrl' && settings.autoDetectPlatform) {
+      if (value.includes('github.com')) {
+        newSettings.platform = 'github';
+        const match = value.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        if (match) {
+          newSettings.repository = match[1].replace('.git', '');
+        }
+      } else if (value.includes('gitlab.com')) {
+        newSettings.platform = 'gitlab';
+        const match = value.match(/gitlab\.com\/([^\/]+\/[^\/]+)/);
+        if (match) {
+          newSettings.repository = match[1].replace('.git', '');
+        }
+      }
     }
 
-    updateTimeoutRef.current = setTimeout(() => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                platform,
-                apiKey,
-                repoUrl,
-                customEndpoint,
-                repoData,
-                branches,
-                selectedBranch,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-          }
-          return node;
-        })
-      );
-    }, 1000);
+    setSettings(newSettings);
+  };
 
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, [platform, apiKey, repoUrl, customEndpoint, repoData, branches, selectedBranch, id, setNodes]);
-
-  const parseRepoUrl = useCallback((url) => {
-    try {
-      let regex;
-      if (customEndpoint) {
-        const domain = new URL(customEndpoint).hostname;
-        regex = new RegExp(`${domain.replace('.', '\\.')}\/([^\/]+)\/([^\/]+)`);
-      } else {
-        regex = platform === 'github'
-          ? /github\.com\/([^\/]+)\/([^\/]+)/
-          : /gitlab\.com\/([^\/]+)\/([^\/]+)/;
-      }
-      const match = url.match(regex);
-      if (match) {
-        return {
-          owner: match[1],
-          repo: match[2].replace('.git', '')
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }, [customEndpoint, platform]);
-
-  // **NEW: Fetch Branches Function**
-  const fetchBranches = useCallback(async () => {
-    if (!apiKey || !repoUrl || isFetchingBranches) {
+  // Analyze repository to get all available extensions
+  const analyzeRepository = useCallback(async () => {
+    if (!settings.repository) {
+      alert('Please enter a repository name first');
       return;
     }
 
-    const parsedRepo = parseRepoUrl(repoUrl);
-    if (!parsedRepo) {
-      setError('Invalid repository URL format');
-      return;
-    }
-
-    const endpoint = getApiEndpoint();
-    setIsFetchingBranches(true);
-    setError(null);
+    setIsAnalyzing(true);
 
     try {
-      console.log(`🌿 GitNode ${id}: Fetching branches for ${repoUrl}`);
+      console.log('🔍 Analyzing repository for extensions...');
 
-      let branchData = [];
-      if (platform === 'github') {
-        const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/branches?per_page=100`;
-        const headers = {
-          'Authorization': `token ${apiKey}`,
-          'Accept': 'application/vnd.github.v3+json'
-        };
-
-        const response = await fetch(apiUrl, { headers });
-        if (!response.ok) {
-          throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        branchData = data.map(branch => ({
-          name: branch.name,
-          isDefault: branch.name === 'main' || branch.name === 'master',
-          commit: branch.commit.sha,
-          protected: branch.protected || false
-        }));
-
-      } else {
-        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/branches?per_page=100`;
-        const headers = {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        };
-
-        const response = await fetch(apiUrl, { headers });
-        if (!response.ok) {
-          throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        branchData = data.map(branch => ({
-          name: branch.name,
-          isDefault: branch.default || false,
-          commit: branch.commit.id,
-          protected: branch.protected || false
-        }));
+      let allFiles = [];
+      if (settings.platform === 'github') {
+        allFiles = await fetchGitHubFileList();
+      } else if (settings.platform === 'gitlab') {
+        allFiles = await fetchGitLabFileList();
       }
 
-      console.log(`✅ GitNode ${id}: Found ${branchData.length} branches`);
-      setBranches(branchData);
+      // Extract unique extensions
+      const extensions = new Set();
+      allFiles.forEach(file => {
+        const fileName = file.path || file.name || '';
+        const extension = fileName.split('.').pop()?.toLowerCase();
+        if (extension && extension !== fileName.toLowerCase()) {
+          extensions.add(extension);
+        }
+      });
 
-      // Auto-select default branch
-      const defaultBranch = branchData.find(b => b.isDefault) || branchData[0];
-      if (defaultBranch && !selectedBranch) {
-        setSelectedBranch(defaultBranch.name);
+      const sortedExtensions = Array.from(extensions).sort();
+      setAvailableExtensions(sortedExtensions);
+
+      // Auto-select common code extensions if none selected
+      if (settings.includeExtensions.length === 0) {
+        const commonExtensions = ['js', 'jsx', 'ts', 'tsx', 'py', 'md', 'txt', 'json'];
+        const autoSelected = sortedExtensions.filter(ext => commonExtensions.includes(ext));
+        handleSettingChange('includeExtensions', autoSelected);
       }
 
-    } catch (err) {
-      console.error(`❌ GitNode ${id}: Branch fetch failed:`, err);
-      setError(`Failed to fetch branches: ${err.message}`);
+      setStats(prev => ({
+        ...prev,
+        totalExtensions: sortedExtensions.length
+      }));
+
+      console.log('✅ Found extensions:', sortedExtensions);
+
+    } catch (error) {
+      console.error('❌ Repository analysis error:', error);
+      alert(`Failed to analyze repository: ${error.message}`);
     } finally {
-      setIsFetchingBranches(false);
+      setIsAnalyzing(false);
     }
-  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isFetchingBranches, id, selectedBranch]);
+  }, [settings]);
 
-  // **ENHANCED: Fetch Repository Contents with Branch Support**
-  const fetchRepoContents = useCallback(async () => {
-    if (!apiKey || !repoUrl || isLoading) {
-      console.log(`⚠️ GitNode ${id}: Cannot fetch - missing data or already loading`);
+  // Fetch file list without content for analysis
+  const fetchGitHubFileList = async () => {
+    const [owner, repo] = settings.repository.split('/');
+    if (!owner || !repo) {
+      throw new Error('Invalid repository format. Use: owner/repository');
+    }
+
+    const headers = {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'RAG-Node-App'
+    };
+
+    if (settings.accessToken) {
+      headers['Authorization'] = `token ${settings.accessToken}`;
+    }
+
+    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${settings.branch || 'main'}?recursive=1`;
+    const response = await fetch(treeUrl, { headers });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`GitHub API error: ${errorData.message}`);
+    }
+
+    const data = await response.json();
+    return data.tree.filter(item => item.type === 'blob');
+  };
+
+  const fetchGitLabFileList = async () => {
+    const projectId = encodeURIComponent(settings.repository);
+    const headers = { 'Content-Type': 'application/json' };
+
+    if (settings.accessToken) {
+      headers['Authorization'] = `Bearer ${settings.accessToken}`;
+    }
+
+    const treeUrl = `https://gitlab.com/api/v4/projects/${projectId}/repository/tree?recursive=true&ref=${settings.branch || 'main'}`;
+    const response = await fetch(treeUrl, { headers });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`GitLab API error: ${errorData.message}`);
+    }
+
+    return await response.json();
+  };
+
+  // Handle extension selection
+  const handleExtensionToggle = (extension, isSelected) => {
+    const newExtensions = isSelected
+      ? [...settings.includeExtensions, extension]
+      : settings.includeExtensions.filter(ext => ext !== extension);
+
+    handleSettingChange('includeExtensions', newExtensions);
+  };
+
+  // Fetch branches
+  const fetchBranches = useCallback(async () => {
+    if (!settings.repository) {
+      alert('Please enter a repository name first');
       return;
     }
 
-    const parsedRepo = parseRepoUrl(repoUrl);
-    if (!parsedRepo) {
-      setError('Invalid repository URL format');
-      return;
-    }
-
-    const endpoint = getApiEndpoint();
-    if (!endpoint) {
-      setError('API endpoint not configured');
-      return;
-    }
-
-    // Cancel any previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    // Create new abort controller
-    abortControllerRef.current = new AbortController();
-
-    setIsLoading(true);
-    setError(null);
+    setIsLoadingBranches(true);
 
     try {
-      console.log(`🔍 GitNode ${id}: Starting repository fetch for ${repoUrl} (branch: ${selectedBranch || 'default'})`);
+      console.log('🌿 Fetching branches...');
+      let branches = [];
 
-      let allContents = [];
-      if (platform === 'github') {
-        const fetchedPaths = new Set();
-        const fetchDirectory = async (dirPath = '') => {
-          if (fetchedPaths.has(dirPath)) return;
-          fetchedPaths.add(dirPath);
-          const pathParam = dirPath ? `/${dirPath}` : '';
-          // **NEW: Add branch parameter if selected**
-          const branchParam = selectedBranch ? `?ref=${selectedBranch}` : '';
-          const apiUrl = `${endpoint}/repos/${parsedRepo.owner}/${parsedRepo.repo}/contents${pathParam}${branchParam}`;
-          const headers = {
-            'Authorization': `token ${apiKey}`,
-            'Accept': 'application/vnd.github.v3+json'
-          };
-
-          console.log(`📡 GitNode ${id}: Fetching ${apiUrl}`);
-
-          const response = await fetch(apiUrl, {
-            headers,
-            signal: abortControllerRef.current?.signal
-          });
-
-          if (!response.ok) {
-            throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
-          }
-
-          const data = await response.json();
-          for (const item of data) {
-            const formattedItem = {
-              name: item.name,
-              type: item.type === 'dir' ? 'folder' : 'file',
-              path: item.path,
-              size: item.size || 0,
-              url: item.download_url || item.html_url,
-              depth: (item.path.match(/\//g) || []).length,
-              branch: selectedBranch || 'default'
-            };
-            allContents.push(formattedItem);
-            if (item.type === 'dir') {
-              await fetchDirectory(item.path);
-            }
-          }
-        };
-        await fetchDirectory();
-      } else {
-        // **NEW: GitLab with branch support**
-        const branchParam = selectedBranch ? `&ref=${selectedBranch}` : '';
-        const apiUrl = `${endpoint}/projects/${encodeURIComponent(parsedRepo.owner + '/' + parsedRepo.repo)}/repository/tree?recursive=true&per_page=1000${branchParam}`;
-        const headers = {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        };
-
-        console.log(`📡 GitNode ${id}: Fetching ${apiUrl}`);
-
-        const response = await fetch(apiUrl, {
-          headers,
-          signal: abortControllerRef.current?.signal
-        });
-
-        if (!response.ok) {
-          throw new Error(`GitLab API Error: ${response.status} ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        allContents = data.map(item => ({
-          name: item.name,
-          type: item.type === 'tree' ? 'folder' : 'file',
-          path: item.path,
-          size: 0,
-          url: item.web_url,
-          depth: (item.path.match(/\//g) || []).length,
-          branch: selectedBranch || 'default'
-        }));
+      if (settings.platform === 'github') {
+        branches = await fetchGitHubBranches();
+      } else if (settings.platform === 'gitlab') {
+        branches = await fetchGitLabBranches();
       }
 
-      const result = {
-        owner: parsedRepo.owner,
-        repo: parsedRepo.repo,
-        platform,
-        endpoint,
-        selectedBranch: selectedBranch || 'default',
-        branches: branches,
-        contents: allContents,
-        fetchedAt: new Date().toISOString(),
-        totalFiles: allContents.filter(item => item.type === 'file').length,
-        totalFolders: allContents.filter(item => item.type === 'folder').length
+      setAvailableBranches(branches);
+      setStats(prev => ({ ...prev, totalBranches: branches.length }));
+
+      // Auto-select default branch if available
+      if (branches.length > 0) {
+        const defaultBranch = branches.find(b => b.isDefault);
+        if (defaultBranch && !settings.branch) {
+          handleSettingChange('branch', defaultBranch.name);
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Branch fetch error:', error);
+      alert(`Failed to fetch branches: ${error.message}`);
+    } finally {
+      setIsLoadingBranches(false);
+    }
+  }, [settings]);
+
+  // GitHub branch fetching
+  const fetchGitHubBranches = async () => {
+    const [owner, repo] = settings.repository.split('/');
+    if (!owner || !repo) {
+      throw new Error('Invalid repository format. Use: owner/repository');
+    }
+
+    const headers = {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'RAG-Node-App'
+    };
+
+    if (settings.accessToken) {
+      headers['Authorization'] = `token ${settings.accessToken}`;
+    }
+
+    // Get repository info first
+    const repoUrl = `https://api.github.com/repos/${owner}/${repo}`;
+    const repoResponse = await fetch(repoUrl, { headers });
+
+    if (!repoResponse.ok) {
+      const errorData = await repoResponse.json();
+      throw new Error(`GitHub API error: ${errorData.message || repoResponse.statusText}`);
+    }
+
+    const repoData = await repoResponse.json();
+    setRepositoryInfo({
+      name: repoData.name,
+      fullName: repoData.full_name,
+      description: repoData.description,
+      defaultBranch: repoData.default_branch,
+      isPrivate: repoData.private,
+      language: repoData.language,
+      stars: repoData.stargazers_count,
+      forks: repoData.forks_count
+    });
+
+    // Get branches
+    const branchesUrl = `https://api.github.com/repos/${owner}/${repo}/branches`;
+    const branchesResponse = await fetch(branchesUrl, { headers });
+
+    if (!branchesResponse.ok) {
+      const errorData = await branchesResponse.json();
+      throw new Error(`GitHub API error: ${errorData.message || branchesResponse.statusText}`);
+    }
+
+    const branchesData = await branchesResponse.json();
+
+    return branchesData.map(branch => ({
+      name: branch.name,
+      sha: branch.commit.sha,
+      isDefault: branch.name === repoData.default_branch,
+      protected: branch.protected || false
+    }));
+  };
+
+  const fetchGitLabBranches = async () => {
+    const projectId = encodeURIComponent(settings.repository);
+    const baseUrl = 'https://gitlab.com/api/v4';
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (settings.accessToken) {
+      headers['Authorization'] = `Bearer ${settings.accessToken}`;
+    }
+
+    const projectUrl = `${baseUrl}/projects/${projectId}`;
+    const projectResponse = await fetch(projectUrl, { headers });
+
+    if (!projectResponse.ok) {
+      const errorData = await projectResponse.json();
+      throw new Error(`GitLab API error: ${errorData.message || projectResponse.statusText}`);
+    }
+
+    const projectData = await projectResponse.json();
+    setRepositoryInfo({
+      name: projectData.name,
+      fullName: projectData.path_with_namespace,
+      description: projectData.description,
+      defaultBranch: projectData.default_branch,
+      isPrivate: projectData.visibility === 'private',
+      language: projectData.languages ? Object.keys(projectData.languages)[0] : null,
+      stars: projectData.star_count,
+      forks: projectData.forks_count
+    });
+
+    const branchesUrl = `${baseUrl}/projects/${projectId}/repository/branches`;
+    const branchesResponse = await fetch(branchesUrl, { headers });
+
+    if (!branchesResponse.ok) {
+      const errorData = await branchesResponse.json();
+      throw new Error(`GitLab API error: ${errorData.message || branchesResponse.statusText}`);
+    }
+
+    const branchesData = await branchesResponse.json();
+
+    return branchesData.map(branch => ({
+      name: branch.name,
+      sha: branch.commit.id,
+      isDefault: branch.default,
+      protected: branch.protected
+    }));
+  };
+
+  // Fetch repository
+  const fetchRepository = useCallback(async () => {
+    if (!settings.repository.trim()) {
+      alert('Please enter a repository name');
+      return;
+    }
+
+    if (!settings.branch) {
+      alert('Please select a branch to fetch');
+      return;
+    }
+
+    setIsFetching(true);
+    const startTime = Date.now();
+
+    try {
+      console.log('🚀 Starting repository fetch...');
+      console.log('📁 Repository:', settings.repository);
+      console.log('🌿 Branch:', settings.branch);
+      console.log('📄 Extensions:', settings.includeExtensions);
+
+      let allFiles = [];
+      if (settings.platform === 'github') {
+        allFiles = await fetchGitHubRepositoryFiles(settings.branch);
+      } else if (settings.platform === 'gitlab') {
+        allFiles = await fetchGitLabRepositoryFiles(settings.branch);
+      }
+
+      const combinedContent = allFiles
+        .map(file => file.content || '')
+        .filter(content => content.trim().length > 0)
+        .join('\n\n');
+
+      const processingTime = Date.now() - startTime;
+      const totalSize = allFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+
+      const newStats = {
+        totalFiles: allFiles.length,
+        fetchedFiles: allFiles.length,
+        totalSize,
+        processingTime,
+        lastFetched: Date.now(),
+        errors: 0,
+        totalBranches: 1,
+        totalExtensions: availableExtensions.length,
       };
 
-      console.log(`✅ GitNode ${id}: Successfully fetched ${allContents.length} items from branch: ${selectedBranch || 'default'}`);
-      setRepoData(result);
+      setStats(newStats);
+      setRepositoryFiles(allFiles);
+      setRepositoryContent(combinedContent);
 
-      // **TRIGGER NEXT NODES**
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await triggerNextNodes(id);
+      console.log('✅ Repository fetch completed successfully');
 
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error(`❌ GitNode ${id}: Fetch failed:`, err);
-        setError(err.message);
-      }
-    } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
-    }
-  }, [apiKey, repoUrl, parseRepoUrl, getApiEndpoint, platform, isLoading, id, triggerNextNodes, selectedBranch, branches]);
-
-  const handleNodeExecution = useCallback(async (inputData) => {
-    console.log(`🎯 GitNode ${id}: Executing with input data:`, inputData);
-
-    try {
-      if (apiKey && repoUrl && !isLoading) {
-        console.log(`🔄 GitNode ${id}: Auto-fetching repository data`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        if (fetchButtonRef.current && !isLoading) {
-          console.log(`✅ GitNode ${id}: Triggering fetch button`);
-          fetchButtonRef.current.click();
-        } else {
-          await fetchRepoContents();
-        }
-      }
     } catch (error) {
-      console.error(`❌ GitNode ${id}: Error during execution:`, error);
+      console.error('❌ Repository fetch error:', error);
+      alert(`Repository fetch failed: ${error.message}`);
+    } finally {
+      setIsFetching(false);
     }
-  }, [id, fetchRepoContents, isLoading, apiKey, repoUrl]);
+  }, [settings, availableExtensions]);
 
-  useEffect(() => {
-    const handleAutoExecution = (event) => {
-      if (event.detail.nodeId === id) {
-        console.log(`🎯 GitNode ${id}: Auto-triggered for execution`);
+  // GitHub file fetching
+  const fetchGitHubRepositoryFiles = async (branch) => {
+    const [owner, repo] = settings.repository.split('/');
 
-        if (fetchButtonRef.current && !isLoading && apiKey && repoUrl) {
-          console.log(`✅ GitNode ${id}: Triggering fetch button click`);
-          fetchButtonRef.current.click();
-          return;
-        }
-
-        if (apiKey && repoUrl && !isLoading) {
-          console.log(`✅ GitNode ${id}: Direct function call for auto-execution`);
-          fetchRepoContents();
-        } else {
-          console.log(`⚠️ GitNode ${id}: Cannot auto-execute - missing credentials or loading`);
-        }
-      }
+    const headers = {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'RAG-Node-App'
     };
 
-    window.addEventListener('triggerExecution', handleAutoExecution);
-    window.addEventListener('triggerPlayButton', handleAutoExecution);
-    window.addEventListener('autoExecute', handleAutoExecution);
+    if (settings.accessToken) {
+      headers['Authorization'] = `token ${settings.accessToken}`;
+    }
 
-    return () => {
-      window.removeEventListener('triggerExecution', handleAutoExecution);
-      window.removeEventListener('triggerPlayButton', handleAutoExecution);
-      window.removeEventListener('autoExecute', handleAutoExecution);
-    };
-  }, [id, apiKey, repoUrl, isLoading, fetchRepoContents]);
+    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+    const treeResponse = await fetch(treeUrl, { headers });
 
-  const toggleFolder = useCallback((folderPath) => {
-    setExpandedFolders(prev => {
-      const newExpanded = new Set(prev);
-      if (newExpanded.has(folderPath)) {
-        newExpanded.delete(folderPath);
-      } else {
-        newExpanded.add(folderPath);
+    if (!treeResponse.ok) {
+      const errorData = await treeResponse.json();
+      throw new Error(`GitHub API error: ${errorData.message}`);
+    }
+
+    const treeData = await treeResponse.json();
+    const files = [];
+
+    for (const item of treeData.tree) {
+      if (item.type !== 'blob') continue;
+
+      const fileName = item.path.split('/').pop();
+      const fileExtension = fileName.split('.').pop()?.toLowerCase();
+
+      // Apply extension filter
+      if (settings.includeExtensions.length > 0 && !settings.includeExtensions.includes(fileExtension)) {
+        continue;
       }
-      return newExpanded;
-    });
-  }, []);
 
-  const handleInteractionEvent = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
+      // Apply exclude patterns
+      const shouldExclude = settings.excludePatterns.some(pattern =>
+        item.path.includes(pattern)
+      );
+      if (shouldExclude) continue;
+
+      if (item.size && item.size > settings.maxFileSize * 1024 * 1024) {
+        continue;
+      }
+
+      let fileContent = '';
+      if (settings.fetchContent && item.size < 1024 * 1024) {
+        try {
+          const contentResponse = await fetch(item.url, { headers });
+          if (contentResponse.ok) {
+            const contentData = await contentResponse.json();
+            if (contentData.content) {
+              fileContent = atob(contentData.content);
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching content for ${item.path}:`, error);
+        }
+      }
+
+      files.push({
+        name: fileName,
+        filename: fileName,
+        path: item.path,
+        content: fileContent,
+        text: fileContent,
+        size: item.size || 0,
+        extension: fileExtension,
+        type: `text/${fileExtension}`,
+        url: item.url,
+        sha: item.sha,
+        metadata: {
+          repository: settings.repository,
+          branch: branch,
+          path: item.path,
+          sha: item.sha,
+          size: item.size,
+          lastModified: new Date().toISOString()
+        }
+      });
+
+      if (files.length >= settings.maxFiles) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    return files;
+  };
+
+  // Similar implementation for GitLab
+  const fetchGitLabRepositoryFiles = async (branch) => {
+    const projectId = encodeURIComponent(settings.repository);
+    const baseUrl = 'https://gitlab.com/api/v4';
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (settings.accessToken) {
+      headers['Authorization'] = `Bearer ${settings.accessToken}`;
+    }
+
+    const treeUrl = `${baseUrl}/projects/${projectId}/repository/tree?recursive=true&ref=${branch}`;
+    const treeResponse = await fetch(treeUrl, { headers });
+
+    if (!treeResponse.ok) {
+      const errorData = await treeResponse.json();
+      throw new Error(`GitLab API error: ${errorData.message}`);
+    }
+
+    const treeData = await treeResponse.json();
+    const files = [];
+
+    for (const item of treeData) {
+      if (item.type !== 'blob') continue;
+
+      const fileName = item.name;
+      const fileExtension = fileName.split('.').pop()?.toLowerCase();
+
+      if (settings.includeExtensions.length > 0 && !settings.includeExtensions.includes(fileExtension)) {
+        continue;
+      }
+
+      const shouldExclude = settings.excludePatterns.some(pattern =>
+        item.path.includes(pattern)
+      );
+      if (shouldExclude) continue;
+
+      let fileContent = '';
+      if (settings.fetchContent) {
+        try {
+          const contentUrl = `${baseUrl}/projects/${projectId}/repository/files/${encodeURIComponent(item.path)}/raw?ref=${branch}`;
+          const contentResponse = await fetch(contentUrl, { headers });
+          if (contentResponse.ok) {
+            fileContent = await contentResponse.text();
+          }
+        } catch (error) {
+          console.error(`Error fetching content for ${item.path}:`, error);
+        }
+      }
+
+      files.push({
+        name: fileName,
+        filename: fileName,
+        path: item.path,
+        content: fileContent,
+        text: fileContent,
+        size: fileContent.length,
+        extension: fileExtension,
+        type: `text/${fileExtension}`,
+        id: item.id,
+        metadata: {
+          repository: settings.repository,
+          branch: branch,
+          path: item.path,
+          id: item.id,
+          lastModified: new Date().toISOString()
+        }
+      });
+
+      if (files.length >= settings.maxFiles) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    return files;
+  };
 
   return (
-    <motion.div
-      ref={nodeRef}
-      className={`relative w-80 bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 border-2 border-amber-200 rounded-xl shadow-lg group nowheel overflow-visible ${
-        selected ? 'ring-2 ring-amber-300' : ''
-      }`}
-      style={{ minHeight: '600px' }}
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('input, button, select, .nowheel')) {
-          e.stopPropagation();
-        }
-      }}
-      whileHover={{
-        scale: 1.01,
-        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
-      }}
-    >
-      {/* Background Beams when loading */}
-      <AnimatePresence>
-        {isLoading && (
-          <BackgroundBeams className="opacity-20" />
-        )}
-      </AnimatePresence>
-
-      {/* **FIXED: PlayButton positioning - moved outside container** */}
-      <div className="absolute -top-4 -left-4 z-30">
-        <PlayButton
-          nodeId={id}
-          nodeType="git"
-          onExecute={handleNodeExecution}
-          disabled={isLoading}
-        />
-      </div>
-
-      {/* **FIXED: Delete button positioning - moved outside container** */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}
-        title="Delete node"
-        whileHover={{ scale: 1.1, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
-      >
-        ×
-      </motion.button>
-
-      {/* **FIXED: Input Handle - Made larger and more visible** */}
+    <div className="relative">
+      {/* FIXED: Added proper target handle for connections */}
       <Handle
         type="target"
         position={Position.Left}
         id="input"
-        style={{
-          background: 'linear-gradient(45deg, #f59e0b, #d97706)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(245, 158, 11, 0.4)',
-          left: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-blue-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-
-      <div className="p-4 pt-8 nowheel">
-        {/* **FIXED: Header - Simplified** */}
-        <div className="flex items-center space-x-2 mb-4">
-          <FloatingIcon isProcessing={isLoading}>
-            <span className="text-xl">🐙</span>
-          </FloatingIcon>
-          <h3 className="text-sm font-semibold text-amber-800">
-            Git Repository
-          </h3>
-        </div>
-
-        {/* Platform Selection */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-amber-700 mb-2 block">
-            🏢 Platform
-          </label>
-          <motion.select
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
-            whileFocus={{ scale: 1.01 }}
-          >
-            <option value="github">🐙 GitHub</option>
-            <option value="gitlab">🦊 GitLab</option>
-          </motion.select>
-        </div>
-
-        {/* Repository URL */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-amber-700 mb-2 block">
-            🔗 Repository URL
-          </label>
-          <motion.input
-            type="text"
-            value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="https://github.com/owner/repo"
-            className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
-            whileFocus={{ scale: 1.01 }}
-          />
-        </div>
-
-        {/* API Key */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-amber-700 mb-2 block">
-            🔑 API Key
-          </label>
-          <div className="relative">
-            <motion.input
-              type={showApiKey ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Enter your API key"
-              className="w-full p-2 pr-8 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            />
-            <motion.button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-amber-600 hover:text-amber-800 nodrag"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              {showApiKey ? '🙈' : '👁️'}
-            </motion.button>
-          </div>
-        </div>
-
-        {/* **NEW: Branch Selection Section** */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-medium text-amber-700">
-              🌿 Branch Selection
-            </label>
-            <motion.button
-              onClick={fetchBranches}
-              disabled={isFetchingBranches || !apiKey || !repoUrl}
-              className="text-xs bg-amber-200 hover:bg-amber-300 px-2 py-1 rounded transition-colors nodrag disabled:opacity-50 disabled:cursor-not-allowed"
-              whileHover={{ scale: isFetchingBranches || !apiKey || !repoUrl ? 1 : 1.05 }}
-              whileTap={{ scale: isFetchingBranches || !apiKey || !repoUrl ? 1 : 0.95 }}
-            >
-              {isFetchingBranches ? '🔄' : '🌿'} {isFetchingBranches ? 'Fetching...' : 'Fetch Branches'}
-            </motion.button>
-          </div>
-
-          {branches.length > 0 ? (
-            <motion.select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            >
-              {branches.map(branch => (
-                <option key={branch.name} value={branch.name}>
-                  {branch.name} {branch.isDefault ? '(default)' : ''} {branch.protected ? '🔒' : ''}
-                </option>
-              ))}
-            </motion.select>
-          ) : (
-            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
-              {apiKey && repoUrl ? 'Click "Fetch Branches" to load available branches' : 'Enter API key and repository URL first'}
-            </div>
-          )}
-
-          {selectedBranch && (
-            <div className="text-xs text-amber-600 mt-1">
-              Selected: <strong>{selectedBranch}</strong>
-              {branches.find(b => b.name === selectedBranch)?.isDefault && ' (default branch)'}
-            </div>
-          )}
-        </div>
-
-        {/* Advanced Settings */}
-        <div className="mb-4">
-          <motion.button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="text-xs text-amber-600 hover:text-amber-800 flex items-center space-x-1 nodrag"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <motion.span
-              animate={{ rotate: showAdvanced ? 90 : 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              ▶
-            </motion.span>
-            <span>Advanced Settings</span>
-          </motion.button>
-
-          <AnimatePresence>
-            {showAdvanced && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.3 }}
-                className="mt-2"
-              >
-                <label className="text-xs font-medium text-amber-700 mb-2 block">
-                  🔧 Custom API Endpoint
-                </label>
-                <motion.input
-                  type="text"
-                  value={customEndpoint}
-                  onChange={(e) => setCustomEndpoint(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="https://api.github.com (leave empty for default)"
-                  className="w-full p-2 text-xs border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-800 nodrag"
-                  whileFocus={{ scale: 1.01 }}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Fetch Repository Button */}
-        <motion.button
-          ref={fetchButtonRef}
-          onClick={fetchRepoContents}
-          disabled={isLoading || !apiKey || !repoUrl}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
-            isLoading || !apiKey || !repoUrl
-              ? 'bg-amber-200 text-amber-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-lg'
-          }`}
-          whileHover={{
-            scale: isLoading || !apiKey || !repoUrl ? 1 : 1.02,
-            boxShadow: isLoading || !apiKey || !repoUrl ? undefined : "0 8px 20px rgba(245, 158, 11, 0.3)"
-          }}
-          whileTap={{ scale: isLoading || !apiKey || !repoUrl ? 1 : 0.98 }}
-        >
-          <div className="flex items-center justify-center space-x-2">
-            {isLoading ? (
-              <>
-                <motion.div
-                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-                <span>Fetching Repository...</span>
-              </>
-            ) : (
-              <>
-                <span>🐙</span>
-                <span>Fetch Repository</span>
-              </>
-            )}
-          </div>
-        </motion.button>
-
-        {/* Connection Status */}
-        <div className="mb-3">
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              repoData
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : 'bg-amber-50 text-amber-600 border border-amber-200'
-            }`}
-          >
-            {repoData ? '✅ Repository Loaded' : '⏸️ Ready to Fetch'}
-          </div>
-        </div>
-
-        {/* Error Display */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-              initial={{ opacity: 0, y: -10, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
-            >
-              ❌ {error}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Repository Results */}
-        <AnimatePresence>
-          {repoData && (
-            <motion.div
-              className="text-xs bg-white border border-amber-200 rounded-lg overflow-hidden shadow-lg nowheel"
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              onMouseDown={handleInteractionEvent}
-            >
-              <motion.div
-                className="bg-gradient-to-r from-amber-50 to-orange-50 p-3 cursor-pointer hover:from-amber-100 hover:to-orange-100 transition-all duration-300 nodrag"
-                onClick={() => setIsExpanded(!isExpanded)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-amber-800">
-                    ✅ Repository Fetched
-                  </div>
-                  <motion.span
-                    animate={{ rotate: isExpanded ? 180 : 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                    className="text-amber-600"
-                  >
-                    ▼
-                  </motion.span>
-                </div>
-                <div className="text-amber-700 text-xs mt-1">
-                  {repoData.totalFiles} files, {repoData.totalFolders} folders
-                  {repoData.selectedBranch && ` (${repoData.selectedBranch})`}
-                </div>
-              </motion.div>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onMouseDown={handleInteractionEvent}
-                  >
-                    {/* Repository Info */}
-                    <div className="mb-3">
-                      <div className="font-medium text-amber-700 mb-1">📊 Repository Info</div>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-amber-600">Owner:</span>
-                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.owner}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-600">Repository:</span>
-                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.repo}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-600">Platform:</span>
-                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.platform}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-600">Branch:</span>
-                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.selectedBranch}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-amber-600">Total branches:</span>
-                          <span className="text-amber-500 bg-amber-100 px-1 rounded">{repoData.branches?.length || 0}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* File Tree Preview */}
-                    <div>
-                      <div className="font-medium text-amber-700 mb-1">📁 Contents Preview</div>
-                      {repoData.contents.slice(0, 15).map((item, index) => (
-                        <motion.div
-                          key={index}
-                          className="flex items-center space-x-2 py-1 hover:bg-amber-50 rounded transition-colors"
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.02 }}
-                          whileHover={{ scale: 1.01, x: 4 }}
-                        >
-                          <span className="text-sm">
-                            {item.type === 'folder' ? '📁' : '📄'}
-                          </span>
-                          <span className="text-xs text-amber-700 flex-1 truncate">{item.name}</span>
-                          {item.size > 0 && (
-                            <span className="text-xs text-amber-500 bg-amber-100 px-1 rounded">
-                              {(item.size / 1024).toFixed(1)}KB
-                            </span>
-                          )}
-                        </motion.div>
-                      ))}
-                      {repoData.contents.length > 15 && (
-                        <div className="text-xs text-amber-500 text-center py-1">
-                          ...and {repoData.contents.length - 15} more items
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* **FIXED: Output Handle - Made larger and more visible** */}
       <Handle
         type="source"
         position={Position.Right}
         id="output"
-        style={{
-          background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-          right: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-green-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-    </motion.div>
+
+      <motion.div
+        className={`bg-white rounded-xl shadow-lg border-2 transition-all duration-300 overflow-hidden ${
+          selected ? 'border-amber-400 shadow-amber-100' : 'border-gray-200'
+        }`}
+        style={{ width: '320px', minHeight: '140px' }}
+        whileHover={{ scale: 1.02 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
+      >
+        <BackgroundBeams className="rounded-xl" />
+
+        {/* Header */}
+        <div className="relative z-10 p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">🐙</span>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">Git Repository</h3>
+                <p className="text-xs text-gray-500">
+                  {settings.platform} • {settings.branch} • {settings.includeExtensions.length} extensions
+                  {stats.fetchedFiles > 0 && (
+                    <span className="text-green-600"> • {stats.fetchedFiles} files</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+                title="Settings"
+              >
+                ⚙️
+              </button>
+              <button
+                onClick={analyzeRepository}
+                disabled={isAnalyzing}
+                className="w-6 h-6 flex items-center justify-center rounded bg-purple-100 hover:bg-purple-200 transition-colors disabled:opacity-50"
+                title="Analyze Extensions"
+              >
+                {isAnalyzing ? '🔄' : '🔍'}
+              </button>
+              <button
+                onClick={fetchBranches}
+                disabled={isLoadingBranches}
+                className="w-6 h-6 flex items-center justify-center rounded bg-blue-100 hover:bg-blue-200 transition-colors disabled:opacity-50"
+                title="Fetch Branches"
+              >
+                {isLoadingBranches ? '🔄' : '🌿'}
+              </button>
+              <button
+                onClick={fetchRepository}
+                disabled={isFetching}
+                className="w-6 h-6 flex items-center justify-center rounded bg-amber-100 hover:bg-amber-200 transition-colors disabled:opacity-50"
+                title="Fetch Repository"
+              >
+                {isFetching ? '🔄' : '📥'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Repository Info */}
+        {repositoryInfo && (
+          <div className="relative z-10 px-4 py-2 bg-amber-50 border-b border-amber-100">
+            <div className="text-xs">
+              <div className="font-semibold text-amber-800">{repositoryInfo.name}</div>
+              <div className="text-amber-700">
+                {repositoryInfo.language} • ⭐ {repositoryInfo.stars} • 🍴 {repositoryInfo.forks}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FIXED: Branch Selection as Dropdown */}
+        {availableBranches.length > 0 && (
+          <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+            <div className="text-xs font-medium text-gray-700 mb-2">
+              Select Branch
+            </div>
+            <select
+              value={settings.branch}
+              onChange={(e) => {
+                e.stopPropagation();
+                handleSettingChange('branch', e.target.value);
+              }}
+              className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400"
+            >
+              <option value="">Select a branch...</option>
+              {availableBranches.map((branch, index) => (
+                <option key={index} value={branch.name}>
+                  {branch.name}
+                  {branch.isDefault && ' (default)'}
+                  {branch.protected && ' 🔒'}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Extension Selection */}
+        {availableExtensions.length > 0 && (
+          <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+            <div className="text-xs font-medium text-gray-700 mb-2">
+              File Extensions ({settings.includeExtensions.length}/{availableExtensions.length})
+            </div>
+            <div className="max-h-24 overflow-y-auto">
+              <div className="grid grid-cols-4 gap-1">
+                {availableExtensions.map((ext, index) => (
+                  <label key={index} className="flex items-center space-x-1 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.includeExtensions.includes(ext)}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleExtensionToggle(ext, e.target.checked);
+                      }}
+                      className="rounded text-xs"
+                      style={{ transform: 'scale(0.8)' }}
+                    />
+                    <span className="text-xs">.{ext}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="relative z-10 border-b border-gray-100 bg-gray-50/50"
+            >
+              <div className="p-4 space-y-4">
+                {/* Repository URL */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Repository URL
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.repositoryUrl}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingChange('repositoryUrl', e.target.value);
+                    }}
+                    placeholder="https://github.com/owner/repo"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+
+                {/* Platform Selection */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Platform
+                  </label>
+                  <select
+                    value={settings.platform}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingChange('platform', e.target.value);
+                    }}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                  </select>
+                </div>
+
+                {/* Repository Name */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Repository (owner/repo)
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.repository}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingChange('repository', e.target.value);
+                    }}
+                    placeholder="facebook/react"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+
+                {/* Access Token */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Access Token (optional)
+                  </label>
+                  <input
+                    type="password"
+                    value={settings.accessToken}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingChange('accessToken', e.target.value);
+                    }}
+                    placeholder="ghp_... or glpat-..."
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+
+                {/* File Limits with proper event handling */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Max Files ({settings.maxFiles})
+                    </label>
+                    <input
+                      type="range"
+                      min="10"
+                      max="1000"
+                      step="10"
+                      value={settings.maxFiles}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('maxFiles', parseInt(e.target.value));
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      className="w-full nodrag"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Max Size ({settings.maxFileSize} MB)
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="50"
+                      step="1"
+                      value={settings.maxFileSize}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('maxFileSize', parseInt(e.target.value));
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      className="w-full nodrag"
+                    />
+                  </div>
+                </div>
+
+                {/* Options */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Auto-detect Platform</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.autoDetectPlatform}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('autoDetectPlatform', e.target.checked);
+                      }}
+                      className="rounded"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Fetch Content</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.fetchContent}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('fetchContent', e.target.checked);
+                      }}
+                      className="rounded"
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Processing Indicators */}
+        {(isFetching || isLoadingBranches || isAnalyzing) && (
+          <div className="relative z-10 p-4">
+            <div className="flex items-center justify-center space-x-2 text-sm text-amber-600">
+              <div className="animate-spin w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full"></div>
+              <span>
+                {isAnalyzing ? 'Analyzing extensions...' :
+                 isLoadingBranches ? 'Loading branches...' :
+                 'Fetching repository...'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Stats Display */}
+        {stats.fetchedFiles > 0 && (
+          <div className="relative z-10 px-4 py-2 bg-amber-50 border-b border-amber-100">
+            <div className="grid grid-cols-4 gap-2 text-xs">
+              <div className="text-center">
+                <div className="font-semibold text-amber-700">{stats.fetchedFiles}</div>
+                <div className="text-amber-600">Files</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-amber-700">1</div>
+                <div className="text-amber-600">Branch</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-amber-700">{settings.includeExtensions.length}</div>
+                <div className="text-amber-600">Types</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-amber-700">{Math.round(stats.totalSize / 1024)}KB</div>
+                <div className="text-amber-600">Size</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
-});
+};
 
 export default GitNode;

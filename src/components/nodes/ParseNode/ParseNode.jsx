@@ -1,1217 +1,845 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../../ui/PlayButton';
 
-// Simplified Background Beams
 const BackgroundBeams = ({ className }) => (
-  <div className={`absolute inset-0 pointer-events-none ${className}`}>
-    <svg className="absolute inset-0 h-full w-full opacity-20" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="parse-beams" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M0 40L40 0H20L0 20M40 40V20L20 40" stroke="rgba(156, 163, 175, 0.1)" fill="none" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#parse-beams)" />
-    </svg>
+  <div className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-slate-50/20 via-stone-50/20 to-gray-50/20" />
+    <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-slate-200/30 to-transparent" />
+    <div className="absolute top-1/4 left-0 w-full h-px bg-gradient-to-r from-transparent via-stone-200/30 to-transparent" />
   </div>
 );
 
-// Floating icon animation
-const FloatingIcon = ({ children, isProcessing }) => (
-  <motion.div
-    animate={{
-      y: [0, -2, 0],
-      rotate: isProcessing ? 360 : 0,
-    }}
-    transition={{
-      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-      rotate: { duration: isProcessing ? 2 : 0, repeat: isProcessing ? Infinity : 0, ease: "linear" }
-    }}
-  >
-    {children}
-  </motion.div>
-);
+const ParseNode = ({ id, data, selected }) => {
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
 
-const ParseNode = ({ id, data, isConnectable, selected }) => {
-  const [inputData, setInputData] = useState(data?.inputData || null);
-  const [parsedData, setParsedData] = useState(null);
+  // State management
+  const [showSettings, setShowSettings] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState(null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [connectedInputData, setConnectedInputData] = useState(null);
+  const [parsedContent, setParsedContent] = useState('');
+  const [processedFiles, setProcessedFiles] = useState([]);
 
-  // Parse configuration
-  const [selectedParsers, setSelectedParsers] = useState(new Set(['text', 'json', 'markdown', 'code']));
-  const [preserveMetadata, setPreserveMetadata] = useState(true);
-  const [extractCodeBlocks, setExtractCodeBlocks] = useState(true);
-  const [normalizeWhitespace, setNormalizeWhitespace] = useState(true);
-  const [parseAllFiles, setParseAllFiles] = useState(true);
-  const [maxFileSize, setMaxFileSize] = useState(1024 * 1024); // 1MB limit
+  // Parsing settings
+  const [settings, setSettings] = useState({
+    parseMethod: data.parseMethod || 'auto',
+    includeMetadata: data.includeMetadata !== false,
+    preserveFormatting: data.preserveFormatting !== false,
+    extractImages: data.extractImages || false,
+    extractTables: data.extractTables !== false,
+    maxFileSize: data.maxFileSize || 10, // MB
+    supportedFormats: data.supportedFormats || ['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'py', 'json', 'xml', 'html', 'css', 'yaml'],
+    useInputData: data.useInputData !== false,
+    manualFiles: data.manualFiles || [],
+    contentSeparator: data.contentSeparator || '\n\n',
+    removeEmptyLines: data.removeEmptyLines !== false,
+    normalizeWhitespace: data.normalizeWhitespace !== false,
+  });
 
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const parseButtonRef = useRef(null);
-  const updateTimeoutRef = useRef(null);
+  const [stats, setStats] = useState({
+    totalFiles: 0,
+    parsedFiles: 0,
+    totalSize: 0,
+    processingTime: 0,
+    lastProcessed: null,
+    errors: 0,
+    contentLength: 0,
+  });
 
-  // **CHAIN REACTION FUNCTIONALITY**
-  const triggerNextNodes = useCallback(async (currentNodeId) => {
-    const edges = getEdges();
-    const nodes = getNodes();
-
-    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
-
-    if (outgoingEdges.length > 0) {
-      console.log(`🔗 ParseNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
-
-      for (let i = 0; i < outgoingEdges.length; i++) {
-        const edge = outgoingEdges[i];
-        const targetNode = nodes.find(node => node.id === edge.target);
-
-        if (targetNode) {
-          console.log(`🎯 ParseNode: Triggering ${targetNode.type} node ${edge.target}`);
-
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('triggerExecution', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('autoExecute', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-          }, i * 500);
-        }
-      }
-    } else {
-      console.log(`⏹️ ParseNode: No connected nodes found after parsing`);
-    }
-  }, [getEdges, getNodes]);
-
-  // Available parsers for different file types
-  const availableParsers = [
-    {
-      id: 'text',
-      name: 'Plain Text',
-      icon: '📄',
-      description: 'Extract plain text content from any readable file',
-      extensions: ['txt', 'md', 'rst', 'log', 'csv', 'tsv']
-    },
-    {
-      id: 'json',
-      name: 'JSON',
-      icon: '📋',
-      description: 'Parse JSON structure and content',
-      extensions: ['json', 'jsonl', 'geojson']
-    },
-    {
-      id: 'markdown',
-      name: 'Markdown',
-      icon: '📝',
-      description: 'Parse markdown with structure preservation',
-      extensions: ['md', 'markdown', 'mdown', 'mkd']
-    },
-    {
-      id: 'code',
-      name: 'Source Code',
-      icon: '💻',
-      description: 'Extract code with syntax awareness',
-      extensions: ['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'cs', 'php', 'rb', 'go', 'rs', 'swift', 'kt', 'scala', 'r', 'sh', 'bash', 'h', 'hpp']
-    },
-    {
-      id: 'config',
-      name: 'Configuration',
-      icon: '⚙️',
-      description: 'Parse config files (YAML, TOML, INI)',
-      extensions: ['yml', 'yaml', 'toml', 'ini', 'env', 'conf', 'config']
-    },
-    {
-      id: 'web',
-      name: 'Web Files',
-      icon: '🌐',
-      description: 'Parse HTML, CSS, and web content',
-      extensions: ['html', 'htm', 'css', 'scss', 'sass', 'less']
-    },
-    {
-      id: 'data',
-      name: 'Data Files',
-      icon: '📊',
-      description: 'Parse structured data files',
-      extensions: ['xml', 'sql', 'graphql', 'proto']
-    }
-  ];
-
-  // **FIXED: Fetch actual file content using GitLab Raw endpoint**
-  const fetchFileContent = useCallback(async (file) => {
-    if (!file || file.size === 0) {
-      console.log(`⚠️ ParseNode ${id}: Skipping ${file.name} - zero bytes`);
-      return null;
-    }
-
-    if (file.size > maxFileSize) {
-      console.log(`⚠️ ParseNode ${id}: Skipping ${file.name} - too large (${file.size} bytes)`);
-      return null;
-    }
-
+  // Get input data from connected nodes (FilterNode, GitNode, etc.)
+  const getInputData = useCallback(() => {
     try {
-      console.log(`📄 ParseNode ${id}: Fetching content for ${file.name} (${file.size} bytes)`);
+      const edges = getEdges();
+      const nodes = getNodes();
 
-      let contentUrl;
-      let headers = {};
+      console.log('🔍 ParseNode looking for input data...');
 
-      // Build proper content URL based on platform
-      if (inputData.platform === 'github') {
-        const repoPath = `${inputData.owner}/${inputData.repo}`;
-        const branchParam = inputData.selectedBranch ? `?ref=${inputData.selectedBranch}` : '';
-        contentUrl = `${inputData.endpoint}/repos/${repoPath}/contents/${file.path}${branchParam}`;
-
-        if (inputData.apiKey) {
-          headers['Authorization'] = `token ${inputData.apiKey}`;
-        }
-        headers['Accept'] = 'application/vnd.github.v3+json';
-
-      } else if (inputData.platform === 'gitlab') {
-        const projectPath = encodeURIComponent(`${inputData.owner}/${inputData.repo}`);
-        const filePath = encodeURIComponent(file.path);
-        const branchParam = inputData.selectedBranch || 'main';
-
-        // **FIXED: Use GitLab Raw endpoint for direct file content**
-        contentUrl = `${inputData.endpoint}/projects/${projectPath}/repository/files/${filePath}/raw?ref=${branchParam}`;
-
-        if (inputData.apiKey) {
-          headers['Authorization'] = `Bearer ${inputData.apiKey}`;
-        }
-        headers['Accept'] = 'text/plain';
-      } else {
-        throw new Error(`Unsupported platform: ${inputData.platform}`);
-      }
-
-      console.log(`📡 ParseNode ${id}: Fetching from ${contentUrl}`);
-
-      const response = await fetch(contentUrl, { headers });
-
-      if (!response.ok) {
-        console.error(`❌ ParseNode ${id}: HTTP ${response.status} for ${file.name}: ${response.statusText}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      let content;
-      if (inputData.platform === 'github') {
-        // GitHub API returns JSON with base64 content
-        const data = await response.json();
-        if (data.encoding === 'base64') {
-          content = atob(data.content.replace(/\s/g, ''));
-        } else {
-          content = data.content;
-        }
-      } else {
-        // **FIXED: GitLab raw endpoint returns plain text directly**
-        content = await response.text();
-      }
-
-      console.log(`✅ ParseNode ${id}: Fetched ${content.length} characters from ${file.name}`);
-      return content;
-
-    } catch (error) {
-      console.error(`❌ ParseNode ${id}: Failed to fetch ${file.name}:`, error);
-      return null;
-    }
-  }, [id, inputData, maxFileSize]);
-
-  // **FIXED: Parse content based on file type - ALL STRING LITERAL ERRORS RESOLVED**
-  const parseContent = useCallback((content, fileName, fileExtension, parserType) => {
-    let parsedContent = {
-      raw: content,
-      structured: null,
-      metadata: {}
-    };
-
-    try {
-      switch (parserType) {
-        case 'json':
-          try {
-            parsedContent.structured = JSON.parse(content);
-            parsedContent.metadata.isValidJson = true;
-            parsedContent.metadata.keys = Object.keys(parsedContent.structured).length;
-          } catch (e) {
-            parsedContent.metadata.jsonError = e.message;
-            parsedContent.metadata.isValidJson = false;
-          }
-          break;
-
-        case 'markdown':
-          const markdownLines = content.split('\n');
-          const headers = markdownLines.filter(line => line.match(/^#{1,6}\s/));
-          // **FIXED: Properly escaped regex pattern for code blocks**
-          const codeBlocks = content.match(/``````/g) || [];
-          const links = content.match(/\[([^\]]+)\]\(([^)]+)\)/g) || [];
-
-          parsedContent.structured = {
-            headers: headers.map(h => ({ level: h.match(/^#+/)[0].length, text: h.replace(/^#+\s/, '') })),
-            codeBlocks: codeBlocks.length,
-            links: links.length,
-            lineCount: markdownLines.length,
-            wordCount: content.split(/\s+/).length
-          };
-          break;
-
-        case 'code':
-          const codeAnalysis = analyzeCode(content, fileExtension);
-          parsedContent.structured = codeAnalysis;
-          break;
-
-        case 'config':
-          parsedContent.structured = parseConfigFile(content, fileExtension);
-          break;
-
-        case 'web':
-          if (fileExtension === 'html' || fileExtension === 'htm') {
-            const tags = content.match(/<[^>]+>/g) || [];
-            const scripts = content.match(/<script[\s\S]*?<\/script>/gi) || [];
-            const styles = content.match(/<style[\s\S]*?<\/style>/gi) || [];
-
-            parsedContent.structured = {
-              tagCount: tags.length,
-              scriptBlocks: scripts.length,
-              styleBlocks: styles.length,
-              hasDoctype: content.includes('<!DOCTYPE'),
-              title: content.match(/<title>(.*?)<\/title>/i)?.[1] || null
-            };
-          } else if (fileExtension === 'css') {
-            const rules = content.match(/[^{}]+\{[^{}]*\}/g) || [];
-            const imports = content.match(/@import[^;]+;/g) || [];
-
-            parsedContent.structured = {
-              ruleCount: rules.length,
-              importCount: imports.length,
-              hasMediaQueries: content.includes('@media')
-            };
-          }
-          break;
-
-        case 'data':
-          if (fileExtension === 'xml') {
-            const tags = content.match(/<[^/>][^>]*>/g) || [];
-            parsedContent.structured = {
-              tagCount: tags.length,
-              hasXmlDeclaration: content.includes('<?xml'),
-              rootElement: content.match(/<([^>\s]+)/)?.[1] || null
-            };
-          } else if (fileExtension === 'csv') {
-            const csvLines = content.split('\n').filter(line => line.trim());
-            const headers = csvLines[0] ? csvLines[0].split(',').length : 0;
-
-            parsedContent.structured = {
-              rowCount: csvLines.length,
-              columnCount: headers,
-              estimatedHeaders: csvLines[0] ? csvLines[0].split(',') : []
-            };
-          }
-          break;
-
-        default: // text - **FIXED: Renamed variable to avoid conflict**
-          const textLines = content.split('\n');
-          parsedContent.structured = {
-            lineCount: textLines.length,
-            wordCount: content.split(/\s+/).filter(word => word.length > 0).length,
-            charCount: content.length,
-            isEmpty: content.trim().length === 0,
-            encoding: 'utf-8'
-          };
-      }
-
-      // **FIXED: Extract code blocks if enabled - ALL STRING LITERAL ERRORS RESOLVED**
-      const tripleBacktick = '```';
-      if (extractCodeBlocks && (parserType === 'markdown' || content.includes(tripleBacktick))) {
-        // **FIXED: Use proper regex pattern with escaped backticks**
-        const codeBlockPattern = /``````/g;
-        const extractedCodeBlocks = [];
-        let match;
-
-        while ((match = codeBlockPattern.exec(content)) !== null) {
-          extractedCodeBlocks.push({
-            index: extractedCodeBlocks.length,
-            language: match[1] || 'unknown',
-            code: match[2] || ''
-          });
-        }
-
-        parsedContent.metadata.extractedCodeBlocks = extractedCodeBlocks;
-      }
-
-      // **FIXED: Normalize whitespace if enabled**
-      if (normalizeWhitespace) {
-        parsedContent.normalized = content
-          .replace(/\r\n/g, '\n')
-          .replace(/\t/g, '  ')
-          .replace(/[ \t]+$/gm, '')
-          .replace(/\n{3,}/g, '\n\n');
-      }
-
-    } catch (parseError) {
-      console.error(`❌ ParseNode ${id}: Error parsing ${fileName}:`, parseError);
-      parsedContent.metadata.parseError = parseError.message;
-    }
-
-    return parsedContent;
-  }, [id, extractCodeBlocks, normalizeWhitespace]);
-
-  // **FIXED: Analyze code files - ALL VARIABLE CONFLICTS RESOLVED**
-  const analyzeCode = useCallback((content, extension) => {
-    const codeLines = content.split('\n');
-    let analysis = {
-      lineCount: codeLines.length,
-      emptyLines: codeLines.filter(line => line.trim() === '').length,
-      commentLines: 0,
-      functions: [],
-      classes: [],
-      imports: [],
-      complexity: 0
-    };
-
-    try {
-      switch (extension) {
-        case 'js':
-        case 'jsx':
-        case 'ts':
-        case 'tsx':
-          analysis.functions = content.match(/(?:function\s+\w+|const\s+\w+\s*=\s*(?:$$[^)]*$$\s*)?=>|\w+\s*$$[^)]*$$\s*{)/g) || [];
-          analysis.classes = content.match(/class\s+\w+/g) || [];
-          analysis.imports = content.match(/import\s+.*?from\s+['"][^'"]+['"]|require\s*$$\s*['"][^'"]+['"]\s*$$/g) || [];
-          analysis.commentLines = codeLines.filter(line => line.trim().startsWith('//') || line.trim().startsWith('/*')).length;
-          break;
-
-        case 'py':
-          analysis.functions = content.match(/def\s+\w+\s*$$/g) || [];
-          analysis.classes = content.match(/class\s+\w+/g) || [];
-          analysis.imports = content.match(/(?:import\s+\w+|from\s+\w+\s+import)/g) || [];
-          analysis.commentLines = codeLines.filter(line => line.trim().startsWith('#')).length;
-          break;
-
-        case 'java':
-        case 'cs':
-          analysis.functions = content.match(/(?:public|private|protected)?\s*(?:static\s+)?(?:\w+\s+)*\w+\s*$$[^)]*$$\s*{/g) || [];
-          analysis.classes = content.match(/(?:public\s+)?class\s+\w+/g) || [];
-          analysis.imports = content.match(/import\s+[\w.]+;|using\s+[\w.]+;/g) || [];
-          analysis.commentLines = codeLines.filter(line => line.trim().startsWith('//') || line.trim().startsWith('/*')).length;
-          break;
-
-        case 'cpp':
-        case 'c':
-        case 'h':
-        case 'hpp':
-          analysis.functions = content.match(/(?:\w+\s+)*\w+\s*$$[^)]*$$\s*{/g) || [];
-          analysis.classes = content.match(/class\s+\w+/g) || [];
-          analysis.imports = content.match(/#include\s*[<"][^>"]+[>"]/g) || [];
-          analysis.commentLines = codeLines.filter(line => line.trim().startsWith('//') || line.trim().startsWith('/*')).length;
-          break;
-
-        default:
-          analysis.commentLines = codeLines.filter(line => {
-            const trimmed = line.trim();
-            return trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*');
-          }).length;
-      }
-
-      // Calculate basic complexity
-      analysis.complexity = (content.match(/\b(if|for|while|switch|catch|&&|\|\|)\b/g) || []).length;
-
-    } catch (error) {
-      analysis.error = error.message;
-    }
-
-    return analysis;
-  }, []);
-
-  // **FIXED: Parse configuration files - ALL VARIABLE CONFLICTS RESOLVED**
-  const parseConfigFile = useCallback((content, extension) => {
-    let config = {};
-
-    try {
-      switch (extension) {
-        case 'json':
-          config = JSON.parse(content);
-          break;
-
-        case 'yml':
-        case 'yaml':
-          const yamlContentLines = content.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
-          config.keys = yamlContentLines.filter(line => line.includes(':')).length;
-          config.comments = content.split('\n').filter(line => line.trim().startsWith('#')).length;
-          break;
-
-        case 'ini':
-        case 'env':
-          const iniContentLines = content.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
-          config.sections = (content.match(/$$[^$$]+$$/g) || []).length;
-          config.properties = iniContentLines.filter(line => line.includes('=')).length;
-          break;
-
-        case 'toml':
-          config.sections = (content.match(/$$[^$$]+$$/g) || []).length;
-          config.properties = content.split('\n').filter(line => line.includes('=')).length;
-          break;
-
-        default:
-          config.lineCount = content.split('\n').length;
-      }
-    } catch (error) {
-      config.error = error.message;
-    }
-
-    return config;
-  }, []);
-
-  const isNonReadableFile = useCallback((fileName, fileExtension) => {
-    const nonReadableExtensions = [
-      'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'tiff', 'webp', 'avif',
-      'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv', 'm4v',
-      'mp3', 'wav', 'flac', 'aac', 'ogg', 'wma', 'm4a',
-      'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'lz', 'lzma',
-      'exe', 'dll', 'so', 'dylib', 'bin', 'app', 'deb', 'rpm',
-      'db', 'sqlite', 'sqlite3', 'mdb', 'accdb',
-      'doc', 'xls', 'ppt', 'docx', 'xlsx', 'pptx',
-      'pdf', 'ps', 'eps', 'ai', 'psd', 'sketch',
-      'ttf', 'otf', 'woff', 'woff2', 'eot',
-      'p12', 'pfx', 'key', 'crt', 'cer', 'pem'
-    ];
-
-    const binaryFileNames = ['favicon.ico', 'thumbs.db', '.ds_store', 'desktop.ini'];
-    const readableDotFiles = ['.gitignore', '.gitattributes', '.dockerignore', '.eslintrc', '.prettierrc', '.babelrc', '.npmrc', '.yarnrc', '.editorconfig', '.env'];
-
-    if (fileName.startsWith('.') && readableDotFiles.includes(fileName)) {
-      return false;
-    }
-
-    return nonReadableExtensions.includes(fileExtension) ||
-           binaryFileNames.includes(fileName) ||
-           (fileName.startsWith('.') && !readableDotFiles.includes(fileName));
-  }, []);
-
-  const determineParserType = useCallback((fileName, fileExtension) => {
-    if (parseAllFiles) {
-      for (const parser of availableParsers) {
-        if (selectedParsers.has(parser.id)) {
-          if (parser.extensions.includes(fileExtension) ||
-              (parser.id === 'markdown' && (fileName.startsWith('readme') || fileName.startsWith('changelog'))) ||
-              (parser.id === 'config' && (fileName === 'dockerfile' || fileName === 'makefile' || fileName.startsWith('.git')))) {
-            return parser.id;
-          }
-        }
-      }
-
-      if (['json', 'jsonl', 'geojson'].includes(fileExtension)) return 'json';
-      if (['md', 'markdown', 'mdown', 'mkd'].includes(fileExtension) ||
-          fileName.startsWith('readme') || fileName.startsWith('changelog') || fileName.startsWith('license')) return 'markdown';
-
-      const codeExtensions = ['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'cs', 'php', 'rb', 'go', 'rs', 'swift', 'kt', 'scala', 'r', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd', 'h', 'hpp'];
-      if (codeExtensions.includes(fileExtension)) return 'code';
-
-      const configExtensions = ['yml', 'yaml', 'toml', 'ini', 'env', 'conf', 'config', 'cfg', 'properties'];
-      if (configExtensions.includes(fileExtension) ||
-          fileName === 'dockerfile' || fileName === '.gitignore' || fileName === 'makefile' || fileName.startsWith('.')) return 'config';
-
-      if (['html', 'htm', 'css', 'scss', 'sass', 'less', 'styl'].includes(fileExtension)) return 'web';
-      if (['xml', 'sql', 'graphql', 'proto', 'csv', 'tsv'].includes(fileExtension)) return 'data';
-
-      return 'text';
-    } else {
-      for (const parser of availableParsers) {
-        if (selectedParsers.has(parser.id)) {
-          if (parser.extensions.includes(fileExtension) ||
-              (parser.id === 'markdown' && fileName.startsWith('readme')) ||
-              (parser.id === 'config' && (fileName === 'dockerfile' || fileName === '.gitignore'))) {
-            return parser.id;
-          }
-        }
-      }
-      return null;
-    }
-  }, [parseAllFiles, selectedParsers, availableParsers]);
-
-  const toggleParser = useCallback((parserId) => {
-    setSelectedParsers(prev => {
-      const newSelected = new Set(prev);
-      if (newSelected.has(parserId)) {
-        newSelected.delete(parserId);
-      } else {
-        newSelected.add(parserId);
-      }
-      return newSelected;
-    });
-  }, []);
-
-  // **DEBOUNCED NODE DATA UPDATE**
-  useEffect(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(() => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                inputData,
-                parsedData,
-                selectedParsers: Array.from(selectedParsers),
-                preserveMetadata,
-                extractCodeBlocks,
-                normalizeWhitespace,
-                parseAllFiles,
-                maxFileSize,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-          }
-          return node;
-        })
+      const inputEdge = edges.find(edge =>
+        edge.target === id && edge.targetHandle === 'input'
       );
-    }, 1000);
 
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, [inputData, parsedData, selectedParsers, preserveMetadata, extractCodeBlocks, normalizeWhitespace, parseAllFiles, maxFileSize, id, setNodes]);
+      if (inputEdge) {
+        const inputNode = nodes.find(node => node.id === inputEdge.source);
 
-  // **ENHANCED DATA DETECTION**
-  useEffect(() => {
-    const checkForInputData = () => {
-      try {
-        const edges = getEdges();
-        const nodes = getNodes();
+        if (inputNode && inputNode.data) {
+          console.log('✅ Found input node:', inputNode);
 
-        const incomingEdges = edges.filter(edge => edge.target === id);
+          let inputData = {
+            files: [],
+            metadata: {},
+            nodeType: inputNode.type
+          };
 
-        if (incomingEdges.length > 0) {
-          const sourceEdge = incomingEdges;
-          const sourceNode = nodes.find(node => node.id === sourceEdge.source);
+          switch (inputNode.type) {
+            case 'filterNode':
+              // FIXED: Try multiple field names for FilterNode compatibility
+              inputData.files = inputNode.data.filteredFiles ||
+                                inputNode.data.files ||
+                                inputNode.data.selectedFiles ||
+                                inputNode.data.output ||
+                                [];
+              inputData.metadata = {
+                source: 'filter_node',
+                filterCriteria: inputNode.data.filterCriteria || {},
+                totalFiltered: inputNode.data.totalFiltered || inputData.files.length,
+                originalTotal: inputNode.data.stats?.totalFiles || 0
+              };
+              break;
 
-          if (sourceNode && sourceNode.data && (sourceNode.data.filteredData || sourceNode.data.repoData)) {
-            console.log(`📥 ParseNode ${id}: Received data from previous node`);
-            setInputData(sourceNode.data.filteredData || sourceNode.data.repoData);
+            case 'gitNode':
+              inputData.files = inputNode.data.files ||
+                                inputNode.data.repositoryFiles ||
+                                inputNode.data.fetchedFiles ||
+                                [];
+
+              // If no files array but has content, create virtual file
+              if (inputData.files.length === 0 && (inputNode.data.content || inputNode.data.repositoryContent)) {
+                const content = inputNode.data.content || inputNode.data.repositoryContent;
+                inputData.files = [{
+                  name: 'repository_content.txt',
+                  filename: 'repository_content.txt',
+                  content: content,
+                  text: content,
+                  path: 'repository_content.txt',
+                  type: 'text/plain',
+                  size: content.length,
+                  extension: 'txt'
+                }];
+              }
+
+              inputData.metadata = {
+                source: 'git_node',
+                repository: inputNode.data.repository || '',
+                branch: inputNode.data.branch || 'main',
+                totalFiles: inputNode.data.stats?.fetchedFiles || 0
+              };
+              break;
+
+            case 'textNode':
+              if (inputNode.data.text || inputNode.data.content) {
+                const content = inputNode.data.text || inputNode.data.content;
+                inputData.files = [{
+                  name: 'text_input.txt',
+                  filename: 'text_input.txt',
+                  content: content,
+                  text: content,
+                  path: 'text_input.txt',
+                  type: 'text/plain',
+                  size: content.length,
+                  extension: 'txt'
+                }];
+              }
+              inputData.metadata = {
+                source: 'text_node'
+              };
+              break;
+
+            default:
+              // Enhanced generic fallback
+              const possibleFiles = inputNode.data.files ||
+                                   inputNode.data.output ||
+                                   inputNode.data.data ||
+                                   [];
+
+              // If no files but has content, create virtual file
+              if (possibleFiles.length === 0) {
+                const content = inputNode.data.content ||
+                               inputNode.data.text ||
+                               inputNode.data.output ||
+                               '';
+                if (content) {
+                  inputData.files = [{
+                    name: `${inputNode.type}_content.txt`,
+                    filename: `${inputNode.type}_content.txt`,
+                    content: content,
+                    text: content,
+                    path: `${inputNode.type}_content.txt`,
+                    type: 'text/plain',
+                    size: content.length,
+                    extension: 'txt'
+                  }];
+                }
+              } else {
+                inputData.files = possibleFiles;
+              }
+
+              inputData.metadata = {
+                source: inputNode.type || 'unknown'
+              };
           }
+
+          console.log('✅ Extracted input data:', inputData);
+          console.log('📁 Number of files found:', inputData.files.length);
+
+          setConnectedInputData(inputData);
+          return inputData;
         }
-      } catch (error) {
-        console.error(`❌ ParseNode ${id}: Error checking input data:`, error);
+      }
+
+      console.log('❌ No input data found');
+      setConnectedInputData(null);
+      return { files: [], metadata: {}, nodeType: null };
+    } catch (error) {
+      console.error('❌ Error getting input data:', error);
+      setConnectedInputData(null);
+      return { files: [], metadata: {}, nodeType: null };
+    }
+  }, [id, getNodes, getEdges]);
+
+  // Monitor for input data changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      getInputData();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [getInputData]);
+
+  // Update node data when settings or content changes
+  useEffect(() => {
+    // Store parsed content in multiple field names for ChunkNode compatibility
+    updateNodeData(id, {
+      ...settings,
+      stats,
+      connectedInputData,
+      processedFiles,
+
+      // Store parsed content in multiple formats for downstream compatibility
+      parsedContent: parsedContent,
+      content: parsedContent,
+      text: parsedContent,
+      extractedText: parsedContent,
+      fileContent: parsedContent,
+      output: parsedContent,
+
+      // Alternative field names
+      files: processedFiles,
+
+      lastUpdated: Date.now()
+    });
+  }, [settings, stats, connectedInputData, processedFiles, parsedContent, id, updateNodeData]);
+
+  // Handle setting changes
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+  };
+
+  // Enhanced file parsing functions
+  const parseTextFile = (content, filename) => {
+    let processedContent = content.trim();
+
+    if (settings.removeEmptyLines) {
+      processedContent = processedContent.replace(/^\s*[\r\n]/gm, '');
+    }
+
+    if (settings.normalizeWhitespace) {
+      processedContent = processedContent.replace(/\s+/g, ' ');
+    }
+
+    return {
+      content: processedContent,
+      metadata: {
+        filename,
+        type: 'text',
+        lines: content.split('\n').length,
+        characters: processedContent.length,
+        words: processedContent.split(/\s+/).length
       }
     };
+  };
 
-    checkForInputData();
-  }, [getEdges, getNodes, id]);
+  const parseJavaScriptFile = (content, filename) => {
+    // Extract comments, functions, classes, and imports
+    const comments = content.match(/\/\*[\s\S]*?\*\/|\/\/.*$/gm) || [];
+    const functions = content.match(/function\s+\w+\s*\([^)]*\)|const\s+\w+\s*=\s*\([^)]*\)\s*=>/g) || [];
+    const classes = content.match(/class\s+\w+/g) || [];
+    const imports = content.match(/import\s+.*?from\s+['"].*?['"];?/g) || [];
+    const exports = content.match(/export\s+.*?[;{]/g) || [];
 
-  // **MAIN PARSING FUNCTION WITH CONTENT FETCHING**
-  const parseFiles = useCallback(async () => {
-    if (!inputData || !inputData.contents) {
-      console.log(`⚠️ ParseNode ${id}: No data to parse`);
+    let processedContent = content.trim();
+
+    if (settings.removeEmptyLines) {
+      processedContent = processedContent.replace(/^\s*[\r\n]/gm, '');
+    }
+
+    return {
+      content: processedContent,
+      metadata: {
+        filename,
+        type: 'javascript',
+        comments: comments.length,
+        functions: functions.length,
+        classes: classes.length,
+        imports: imports.length,
+        exports: exports.length,
+        lines: content.split('\n').length
+      }
+    };
+  };
+
+  const parseJSONFile = (content, filename) => {
+    try {
+      const parsed = JSON.parse(content);
+      const flattened = settings.preserveFormatting ? content : JSON.stringify(parsed, null, 2);
+
+      return {
+        content: flattened,
+        metadata: {
+          filename,
+          type: 'json',
+          keys: typeof parsed === 'object' ? Object.keys(parsed).length : 0,
+          valid: true,
+          size: flattened.length
+        }
+      };
+    } catch (error) {
+      return {
+        content: content.trim(),
+        metadata: {
+          filename,
+          type: 'json',
+          valid: false,
+          error: error.message
+        }
+      };
+    }
+  };
+
+  const parseMarkdownFile = (content, filename) => {
+    const headers = content.match(/^#{1,6}\s+.+$/gm) || [];
+    const codeBlocks = content.match(/``````/g) || [];
+    const links = content.match(/\[([^\]]+)\]\(([^)]+)\)/g) || [];
+    const images = content.match(/!\[([^\]]*)\]\(([^)]+)\)/g) || [];
+
+    let processedContent = content.trim();
+
+    if (!settings.preserveFormatting) {
+      // Convert markdown to plain text
+      processedContent = processedContent
+        .replace(/#{1,6}\s+/g, '') // Remove headers
+        .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+        .replace(/\*(.*?)\*/g, '$1') // Remove italic
+        .replace(/`(.*?)`/g, '$1') // Remove inline code
+        .replace(/``````/g, '') // Remove code blocks
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // Convert links to text
+    }
+
+    return {
+      content: processedContent,
+      metadata: {
+        filename,
+        type: 'markdown',
+        headers: headers.length,
+        codeBlocks: codeBlocks.length,
+        links: links.length,
+        images: images.length,
+        lines: content.split('\n').length
+      }
+    };
+  };
+
+  const parseHTMLFile = (content, filename) => {
+    const tags = content.match(/<[^>]+>/g) || [];
+    const scripts = content.match(/<script[\s\S]*?<\/script>/gi) || [];
+    const styles = content.match(/<style[\s\S]*?<\/style>/gi) || [];
+
+    // Extract text content (remove HTML tags)
+    const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    return {
+      content: settings.preserveFormatting ? content.trim() : textContent,
+      metadata: {
+        filename,
+        type: 'html',
+        tags: tags.length,
+        scripts: scripts.length,
+        styles: styles.length,
+        textLength: textContent.length
+      }
+    };
+  };
+
+  const parseYAMLFile = (content, filename) => {
+    const lines = content.split('\n');
+    const keys = lines.filter(line => line.match(/^\s*\w+:/)).length;
+
+    return {
+      content: content.trim(),
+      metadata: {
+        filename,
+        type: 'yaml',
+        lines: lines.length,
+        keys: keys
+      }
+    };
+  };
+
+  // Main parsing process
+  const processParsing = useCallback(async () => {
+    const { files: inputFiles, metadata: inputMetadata } = getInputData();
+
+    // Determine what to parse
+    let filesToParse = [];
+    let sourceMetadata = {};
+
+    if (settings.useInputData && inputFiles.length > 0) {
+      console.log('✅ Using files from connected node');
+      filesToParse = inputFiles;
+      sourceMetadata = inputMetadata;
+    } else if (settings.manualFiles.length > 0) {
+      console.log('📁 Using manual file input');
+      filesToParse = settings.manualFiles;
+      sourceMetadata = { source: 'manual_input' };
+    } else {
+      console.error('❌ No files to parse');
+      alert('Please connect an input node with files or add files manually');
       return;
     }
 
     setIsProcessing(true);
-    setError(null);
-    console.log(`🔄 ParseNode ${id}: Starting enhanced file parsing with GitLab Raw endpoint`);
+    const startTime = Date.now();
 
     try {
-      const parsedFiles = [];
-      const skippedFiles = [];
-      const filesToProcess = inputData.contents.filter(item => item.type === 'file');
+      console.log('🚀 Starting parsing process...');
+      console.log('📁 Files to parse:', filesToParse.length);
 
-      console.log(`📊 ParseNode ${id}: Processing ${filesToProcess.length} files`);
+      const allParsedContent = [];
+      const processedFilesList = [];
+      let totalSize = 0;
+      let errors = 0;
 
-      for (const file of filesToProcess) {
-        const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
-        const fileName = file.name.toLowerCase();
+      for (const file of filesToParse) {
+        try {
+          console.log(`📄 Parsing file: ${file.name || file.filename || 'unknown'}`);
 
-        // Skip non-readable files
-        if (isNonReadableFile(fileName, fileExtension)) {
-          skippedFiles.push({
-            file: file,
-            reason: 'Non-readable or binary file type',
-            extension: fileExtension
-          });
-          console.log(`⏭️ ParseNode ${id}: Skipping ${file.name} - binary file type`);
-          continue;
+          const filename = file.name || file.filename || 'unknown';
+          const content = file.content || file.text || '';
+          const fileSize = file.size || content.length;
+
+          // Check file size limit
+          if (fileSize > settings.maxFileSize * 1024 * 1024) {
+            console.log(`⚠️ Skipping large file: ${filename} (${fileSize} bytes)`);
+            continue;
+          }
+
+          // Determine file type and parse accordingly
+          const extension = filename.split('.').pop()?.toLowerCase() || 'txt';
+          let parsed;
+
+
+
+          switch (extension) {
+            case 'js':
+            case 'jsx':
+            case 'ts':
+            case 'tsx':
+              parsed = parseJavaScriptFile(content, filename);
+              break;
+            case 'json':
+              parsed = parseJSONFile(content, filename);
+              break;
+            case 'md':
+            case 'markdown':
+              parsed = parseMarkdownFile(content, filename);
+              break;
+            case 'html':
+            case 'htm':
+              parsed = parseHTMLFile(content, filename);
+              break;
+            case 'yaml':
+            case 'yml':
+              parsed = parseYAMLFile(content, filename);
+              break;
+            case 'txt':
+            case 'py':
+            case 'css':
+            case 'xml':
+            default:
+              parsed = parseTextFile(content, filename);
+          }
+
+          // Add to parsed content if valid
+          if (parsed.content && parsed.content.trim().length > 0) {
+            allParsedContent.push(parsed.content);
+
+            processedFilesList.push({
+              filename,
+              originalName: file.name || file.filename,
+              type: extension,
+              size: fileSize,
+              contentLength: parsed.content.length,
+              metadata: {
+                ...parsed.metadata,
+                originalPath: file.path || filename,
+                parsedAt: new Date().toISOString(),
+                parseMethod: settings.parseMethod
+              }
+            });
+
+            totalSize += fileSize;
+          }
+
+        } catch (error) {
+          console.error(`❌ Error parsing file ${file.name}:`, error);
+          errors++;
         }
-
-        // Determine parser type
-        const parserType = determineParserType(fileName, fileExtension);
-
-        if (parserType === null && !parseAllFiles) {
-          skippedFiles.push({
-            file: file,
-            reason: 'No matching parser selected',
-            extension: fileExtension
-          });
-          console.log(`⏭️ ParseNode ${id}: Skipping ${file.name} - no matching parser`);
-          continue;
-        }
-
-        // **FIXED: Fetch actual file content using GitLab Raw endpoint**
-        const rawContent = await fetchFileContent(file);
-
-        if (!rawContent) {
-          skippedFiles.push({
-            file: file,
-            reason: 'Failed to fetch content or empty file',
-            extension: fileExtension
-          });
-          console.log(`⏭️ ParseNode ${id}: Skipping ${file.name} - no content`);
-          continue;
-        }
-
-        // Parse the actual content
-        const finalParserType = parserType || 'text';
-        const parsedContent = parseContent(rawContent, fileName, fileExtension, finalParserType);
-
-        const parsedFile = {
-          file: {
-            name: file.name,
-            path: file.path,
-            size: file.size,
-            extension: fileExtension,
-            detectedType: finalParserType,
-            branch: inputData.selectedBranch || 'default'
-          },
-          parser: finalParserType,
-          content: parsedContent,
-          metadata: preserveMetadata ? {
-            parsedAt: new Date().toISOString(),
-            parser: finalParserType,
-            originalSize: file.size,
-            contentLength: rawContent.length,
-            platform: inputData.platform,
-            repository: `${inputData.owner}/${inputData.repo}`,
-            ...parsedContent.metadata
-          } : {}
-        };
-
-        parsedFiles.push(parsedFile);
-        console.log(`✅ ParseNode ${id}: Parsed ${file.name} using ${finalParserType} parser (${rawContent.length} chars)`);
       }
 
-      const result = {
-        ...inputData,
-        parsedFiles: parsedFiles,
-        skippedFiles: skippedFiles,
-        originalFileCount: filesToProcess.length,
-        parsedFileCount: parsedFiles.length,
-        skippedFileCount: skippedFiles.length,
-        parsingConfig: {
-          selectedParsers: Array.from(selectedParsers),
-          preserveMetadata,
-          extractCodeBlocks,
-          normalizeWhitespace,
-          parseAllFiles,
-          maxFileSize
-        },
-        parsedAt: new Date().toISOString()
+      // Combine all parsed content
+      const combinedContent = allParsedContent.join(settings.contentSeparator);
+      const processingTime = Date.now() - startTime;
+
+      // Update stats
+      const newStats = {
+        totalFiles: filesToParse.length,
+        parsedFiles: processedFilesList.length,
+        totalSize,
+        contentLength: combinedContent.length,
+        processingTime,
+        lastProcessed: Date.now(),
+        errors,
       };
 
-      setParsedData(result);
-      console.log(`✨ ParseNode ${id}: Parsing complete! ${parsedFiles.length} files parsed, ${skippedFiles.length} skipped`);
+      setStats(newStats);
+      setParsedContent(combinedContent);
+      setProcessedFiles(processedFilesList);
 
-      // **BROADCAST DATA UPDATE**
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('nodeDataUpdated', {
-          detail: { nodeId: id, data: result }
-        }));
-      }, 100);
-
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await triggerNextNodes(id);
+      console.log('✅ Parsing completed successfully');
+      console.log('📊 Results:', {
+        parsedFiles: processedFilesList.length,
+        contentLength: combinedContent.length,
+        processingTime,
+        errors
+      });
 
     } catch (error) {
-      console.error(`❌ ParseNode ${id}: Parsing failed:`, error);
-      setError(`Parsing failed: ${error.message}`);
+      console.error('❌ Parsing error:', error);
+      alert(`Parsing failed: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
-  }, [inputData, selectedParsers, preserveMetadata, extractCodeBlocks, normalizeWhitespace, parseAllFiles, maxFileSize, id, triggerNextNodes, isNonReadableFile, determineParserType, fetchFileContent, parseContent]);
+  }, [getInputData, settings]);
 
-  const handleNodeExecution = useCallback(async (inputData) => {
-    console.log(`🎯 ParseNode ${id}: Executing with input data:`, inputData);
-
-    try {
-      Object.values(inputData).forEach(data => {
-        if (data.contents || data.filteredData) {
-          console.log(`📥 ParseNode ${id}: Processing data from connected node`);
-          setInputData(data.contents ? data : data.filteredData);
-        }
-      });
-
-      if (inputData && Object.keys(inputData).length > 0) {
-        console.log(`🔄 ParseNode ${id}: Auto-parsing files after receiving data`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        if (parseButtonRef.current && !isProcessing) {
-          console.log(`✅ ParseNode ${id}: Triggering parse button`);
-          parseButtonRef.current.click();
-        } else {
-          await parseFiles();
-        }
-      }
-    } catch (error) {
-      console.error(`❌ ParseNode ${id}: Error during execution:`, error);
+  // Export parsed content
+  const exportParsedContent = () => {
+    if (!parsedContent) {
+      alert('No parsed content to export');
+      return;
     }
-  }, [id, parseFiles, isProcessing]);
 
-  useEffect(() => {
-    const handleAutoExecution = (event) => {
-      if (event.detail.nodeId === id) {
-        console.log(`🎯 ParseNode ${id}: Auto-triggered for execution`);
-
-        if (parseButtonRef.current && !isProcessing && inputData) {
-          console.log(`✅ ParseNode ${id}: Triggering parse button click`);
-          parseButtonRef.current.click();
-          return;
-        }
-
-        if (inputData && !isProcessing) {
-          console.log(`✅ ParseNode ${id}: Direct function call for auto-execution`);
-          parseFiles();
-        } else {
-          console.log(`⚠️ ParseNode ${id}: Cannot auto-execute - no input data available or processing`);
-        }
+    const exportData = {
+      content: parsedContent,
+      files: processedFiles,
+      settings: settings,
+      stats: stats,
+      metadata: {
+        total_files: processedFiles.length,
+        content_length: parsedContent.length,
+        parse_method: settings.parseMethod,
+        created_at: new Date().toISOString(),
+        node_id: id
       }
     };
 
-    window.addEventListener('triggerExecution', handleAutoExecution);
-    window.addEventListener('triggerPlayButton', handleAutoExecution);
-    window.addEventListener('autoExecute', handleAutoExecution);
-
-    return () => {
-      window.removeEventListener('triggerExecution', handleAutoExecution);
-      window.removeEventListener('triggerPlayButton', handleAutoExecution);
-      window.removeEventListener('autoExecute', handleAutoExecution);
-    };
-  }, [id, inputData, isProcessing, parseFiles]);
-
-  const handleDelete = useCallback((e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  }, [id]);
-
-  const handleInteractionEvent = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `parsed-content-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <motion.div
-      className={`relative w-96 bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-50 border-2 border-stone-200 rounded-xl shadow-lg group nowheel overflow-visible ${
-        selected ? 'ring-2 ring-violet-300' : ''
-      }`}
-      style={{ minHeight: '600px' }}
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('input, button, select, .nowheel')) {
-          e.stopPropagation();
-        }
-      }}
-      whileHover={{
-        scale: 1.01,
-        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
-      }}
-    >
-      {/* Background Beams when processing */}
-      <AnimatePresence>
-        {isProcessing && (
-          <BackgroundBeams className="opacity-20" />
-        )}
-      </AnimatePresence>
-
-      {/* **FIXED: PlayButton positioning** */}
-      <div className="absolute -top-4 -left-4 z-30">
-        <PlayButton
-          nodeId={id}
-          nodeType="parse"
-          onExecute={handleNodeExecution}
-          disabled={isProcessing}
-        />
-      </div>
-
-      {/* **FIXED: Delete button positioning** */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}
-        title="Delete node"
-        whileHover={{ scale: 1.1, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
-      >
-        ×
-      </motion.button>
-
-      {/* **FIXED: Input Handle** */}
+    <div className="relative">
+      {/* Handles */}
       <Handle
         type="target"
         position={Position.Left}
         id="input"
-        style={{
-          background: 'linear-gradient(45deg, #6366f1, #8b5cf6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)',
-          left: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-blue-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-
-      <div className="p-4 pt-8 nowheel">
-        {/* Header */}
-        <div className="flex items-center space-x-2 mb-4">
-          <FloatingIcon isProcessing={isProcessing}>
-            <span className="text-xl">🔧</span>
-          </FloatingIcon>
-          <h3 className="text-sm font-semibold text-stone-700">
-            Enhanced File Parser
-          </h3>
-        </div>
-
-        {/* Parse All Files Toggle */}
-        <div className="mb-4">
-          <motion.label
-            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-blue-50 to-sky-50 hover:from-blue-100 hover:to-sky-100 text-blue-700 border border-blue-200 nodrag"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={parseAllFiles}
-              onChange={(e) => setParseAllFiles(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-blue-500 rounded focus:ring-blue-400 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>🚀 Parse All Readable Files</span>
-          </motion.label>
-          <div className="text-xs text-stone-600 mt-1 ml-5">
-            {parseAllFiles ? 'Will fetch and parse all files except binary/encrypted files' : 'Only parse files matching selected parsers'}
-          </div>
-        </div>
-
-        {/* File Size Limit */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-stone-700 mb-2 block">
-            📏 Max File Size: {(maxFileSize / 1024).toFixed(0)}KB
-          </label>
-          <motion.input
-            type="range"
-            min="10240"
-            max="10485760"
-            step="10240"
-            value={maxFileSize}
-            onChange={(e) => setMaxFileSize(parseInt(e.target.value))}
-            onMouseDown={handleInteractionEvent}
-            className="w-full accent-stone-500 nodrag nowheel"
-            whileHover={{ scale: 1.01 }}
-          />
-          <div className="flex justify-between text-xs text-stone-600 mt-1">
-            <span>10KB</span>
-            <span>Recommended: 1MB</span>
-            <span>10MB</span>
-          </div>
-        </div>
-
-        {/* Parser Selection */}
-        <div className="mb-4">
-          <label className="text-xs font-medium text-stone-700 mb-2 block">
-            🔧 File Parsers ({selectedParsers.size} selected)
-          </label>
-          <div className="space-y-1 max-h-48 overflow-y-auto nowheel">
-            {availableParsers.map((parser, index) => (
-              <motion.label
-                key={parser.id}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs nodrag ${
-                  selectedParsers.has(parser.id)
-                    ? 'bg-violet-50 border border-violet-200 text-violet-800'
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
-                }`}
-                onMouseDown={handleInteractionEvent}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.02 }}
-                whileHover={{
-                  scale: 1.01,
-                  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)"
-                }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <motion.input
-                  type="checkbox"
-                  checked={selectedParsers.has(parser.id)}
-                  onChange={() => toggleParser(parser.id)}
-                  onMouseDown={handleInteractionEvent}
-                  className="w-3 h-3 text-violet-500 rounded focus:ring-violet-400 nodrag flex-shrink-0"
-                  whileHover={{ scale: 1.1 }}
-                />
-                <span className="text-sm flex-shrink-0">{parser.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-xs">{parser.name}</div>
-                  <div className="text-xs text-slate-500 truncate">{parser.description}</div>
-                  <div className="text-xs text-slate-400 truncate">
-                    {parser.extensions.slice(0, 4).join(', ')}
-                    {parser.extensions.length > 4 && ` +${parser.extensions.length - 4} more`}
-                  </div>
-                </div>
-              </motion.label>
-            ))}
-          </div>
-        </div>
-
-        {/* Parse Options */}
-        <div className="mb-4 space-y-2">
-          <label className="text-xs font-medium text-stone-700 block">⚙️ Parse Options</label>
-
-          <motion.label
-            className="flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-violet-50 to-purple-50 hover:from-violet-100 hover:to-purple-100 text-violet-700 border border-violet-200 nodrag"
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={preserveMetadata}
-              onChange={(e) => setPreserveMetadata(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-violet-500 rounded focus:ring-violet-400 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>📊 Preserve File Metadata</span>
-          </motion.label>
-
-          <motion.label
-            className="flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 text-rose-700 border border-rose-200 nodrag"
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={extractCodeBlocks}
-              onChange={(e) => setExtractCodeBlocks(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-rose-500 rounded focus:ring-rose-400 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>💻 Extract Code Blocks</span>
-          </motion.label>
-
-          <motion.label
-            className="flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-teal-50 to-cyan-50 hover:from-teal-100 hover:to-cyan-100 text-teal-700 border border-teal-200 nodrag"
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={normalizeWhitespace}
-              onChange={(e) => setNormalizeWhitespace(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-teal-500 rounded focus:ring-teal-400 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>📝 Normalize Whitespace</span>
-          </motion.label>
-        </div>
-
-        {/* Parse Button */}
-        <motion.button
-          ref={parseButtonRef}
-          onClick={parseFiles}
-          onMouseDown={handleInteractionEvent}
-          disabled={isProcessing || !inputData || (!parseAllFiles && selectedParsers.size === 0)}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
-            isProcessing || !inputData || (!parseAllFiles && selectedParsers.size === 0)
-              ? 'bg-stone-200 text-stone-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white shadow-lg'
-          }`}
-          whileHover={{
-            scale: isProcessing || !inputData || (!parseAllFiles && selectedParsers.size === 0) ? 1 : 1.02,
-            boxShadow: isProcessing || !inputData || (!parseAllFiles && selectedParsers.size === 0) ? undefined : "0 8px 20px rgba(139, 92, 246, 0.3)"
-          }}
-          whileTap={{ scale: isProcessing || !inputData || (!parseAllFiles && selectedParsers.size === 0) ? 1 : 0.98 }}
-        >
-          <div className="flex items-center justify-center space-x-2">
-            {isProcessing ? (
-              <>
-                <motion.div
-                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-                <span>Fetching & Parsing...</span>
-              </>
-            ) : (
-              <>
-                <span>🔧</span>
-                <span>{parseAllFiles ? 'Parse All Files' : 'Parse Selected'}</span>
-              </>
-            )}
-          </div>
-        </motion.button>
-
-        {/* Connection Status */}
-        <div className="mb-3">
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              inputData
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : 'bg-stone-50 text-stone-600 border border-stone-200'
-            }`}
-          >
-            {inputData ? '🔗 Connected to FilterNode' : '⏸️ Waiting for filtered data'}
-          </div>
-        </div>
-
-        {/* Error Display */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-              initial={{ opacity: 0, y: -10, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
-            >
-              ❌ {error}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Parse Results */}
-        <AnimatePresence>
-          {parsedData && (
-            <motion.div
-              className="text-xs bg-white border border-stone-200 rounded-lg overflow-hidden shadow-lg nowheel"
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              onMouseDown={handleInteractionEvent}
-            >
-              <motion.div
-                className="bg-gradient-to-r from-stone-50 to-slate-50 p-3 cursor-pointer hover:from-stone-100 hover:to-slate-100 transition-all duration-300 nodrag"
-                onClick={() => setIsExpanded(!isExpanded)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-stone-700">
-                    ✅ Enhanced Parsing Complete
-                  </div>
-                  <motion.span
-                    animate={{ rotate: isExpanded ? 180 : 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                    className="text-stone-500"
-                  >
-                    ▼
-                  </motion.span>
-                </div>
-                <div className="text-stone-600 text-xs mt-1">
-                  {parsedData.originalFileCount} files → {parsedData.parsedFileCount} parsed with content, {parsedData.skippedFileCount} skipped
-                </div>
-              </motion.div>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    className="max-h-64 overflow-y-auto bg-white p-2 nowheel"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onMouseDown={handleInteractionEvent}
-                  >
-                    {/* Parsed Files */}
-                    <div className="mb-3">
-                      <div className="font-medium text-emerald-600 mb-1">📄 Parsed Files ({parsedData.parsedFileCount})</div>
-                      {parsedData.parsedFiles.slice(0, 10).map((file, index) => (
-                        <motion.div
-                          key={index}
-                          className="flex items-center space-x-2 py-1 hover:bg-stone-50 rounded transition-colors"
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.02 }}
-                          whileHover={{ scale: 1.01, x: 4 }}
-                        >
-                          <span className="text-sm">
-                            {availableParsers.find(p => p.id === file.parser)?.icon || '📄'}
-                          </span>
-                          <span className="text-xs text-stone-700 flex-1 truncate">{file.file.name}</span>
-                          <span className="text-xs text-stone-500 bg-stone-100 px-1 rounded">
-                            {file.content.raw?.length || 0} chars
-                          </span>
-                        </motion.div>
-                      ))}
-                      {parsedData.parsedFiles.length > 10 && (
-                        <div className="text-xs text-stone-500 text-center py-1">
-                          ...and {parsedData.parsedFiles.length - 10} more files
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Skipped Files */}
-                    {parsedData.skippedFiles.length > 0 && (
-                      <div>
-                        <div className="font-medium text-amber-600 mb-1">⏭️ Skipped Files ({parsedData.skippedFileCount})</div>
-                        {parsedData.skippedFiles.slice(0, 5).map((item, index) => (
-                          <motion.div
-                            key={index}
-                            className="flex items-center space-x-2 py-1 hover:bg-amber-50 rounded transition-colors"
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: index * 0.02 }}
-                            whileHover={{ scale: 1.01, x: 4 }}
-                          >
-                            <span className="text-sm">⏭️</span>
-                            <span className="text-xs text-stone-700 flex-1 truncate">{item.file.name}</span>
-                            <span className="text-xs text-amber-600 bg-amber-100 px-1 rounded text-center">
-                              {item.reason.includes('Failed') ? 'No content' :
-                               item.reason.includes('binary') ? 'Binary' :
-                               item.reason.includes('large') ? 'Too large' : 'Skipped'}
-                            </span>
-                          </motion.div>
-                        ))}
-                        {parsedData.skippedFiles.length > 5 && (
-                          <div className="text-xs text-stone-500 text-center py-1">
-                            ...and {parsedData.skippedFiles.length - 5} more skipped
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* **FIXED: Output Handle** */}
       <Handle
         type="source"
         position={Position.Right}
         id="output"
-        style={{
-          background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-          right: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-green-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-    </motion.div>
+
+      <motion.div
+        className={`bg-white rounded-xl shadow-lg border-2 transition-all duration-300 overflow-hidden ${
+          selected ? 'border-slate-400 shadow-slate-100' : 'border-gray-200'
+        }`}
+        style={{ width: '280px', minHeight: '120px' }}
+        whileHover={{ scale: 1.02 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
+      >
+        <BackgroundBeams className="rounded-xl" />
+
+        {/* Header */}
+        <div className="relative z-10 p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-slate-400 to-stone-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">🔧</span>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">File Parser</h3>
+                <p className="text-xs text-gray-500">
+                  {settings.parseMethod} • {settings.supportedFormats.length} formats
+                  {stats.parsedFiles > 0 && (
+                    <span className="text-green-600"> • {stats.parsedFiles} parsed</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+                title="Settings"
+              >
+                ⚙️
+              </button>
+              <button
+                onClick={processParsing}
+                disabled={isProcessing}
+                className="w-6 h-6 flex items-center justify-center rounded bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50"
+                title="Parse Files"
+              >
+                {isProcessing ? '🔄' : '▶️'}
+              </button>
+              {parsedContent && (
+                <button
+                  onClick={exportParsedContent}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-blue-100 hover:bg-blue-200 transition-colors"
+                  title="Export Content"
+                >
+                  📥
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Input Data Status */}
+        <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+          <div className={`text-xs px-2 py-1 rounded-full text-center ${
+            connectedInputData && connectedInputData.files.length > 0
+              ? 'bg-blue-100 text-blue-800'
+              : 'bg-gray-100 text-gray-600'
+          }`}>
+            {connectedInputData && connectedInputData.files.length > 0
+              ? `📁 ${connectedInputData.files.length} files from ${connectedInputData.nodeType}`
+              : '📁 No input files detected'
+            }
+          </div>
+        </div>
+
+        {/* Stats Display */}
+        {stats.parsedFiles > 0 && (
+          <div className="relative z-10 px-4 py-2 bg-slate-50 border-b border-slate-100">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center">
+                <div className="font-semibold text-slate-700">{stats.parsedFiles}</div>
+                <div className="text-slate-600">Files</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-slate-700">{Math.round(stats.totalSize / 1024)}KB</div>
+                <div className="text-slate-600">Size</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-slate-700">{stats.processingTime}ms</div>
+                <div className="text-slate-600">Time</div>
+              </div>
+            </div>
+            {stats.errors > 0 && (
+              <div className="text-xs text-center text-red-600 mt-1">
+                {stats.errors} errors
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="relative z-10 border-b border-gray-100 bg-gray-50/50"
+            >
+              <div className="p-4 space-y-4">
+                {/* Data Source Toggle */}
+                <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Use Input Data</label>
+                    <p className="text-xs text-gray-500">Use files from connected nodes</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.useInputData}
+                      onChange={(e) => handleSettingChange('useInputData', e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-600"></div>
+                  </label>
+                </div>
+
+                {/* Parse Method */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Parse Method
+                  </label>
+                  <select
+                    value={settings.parseMethod}
+                    onChange={(e) => handleSettingChange('parseMethod', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  >
+                    <option value="auto">Auto-detect</option>
+                    <option value="text">Plain Text</option>
+                    <option value="structured">Structured</option>
+                    <option value="code">Code Analysis</option>
+                  </select>
+                </div>
+
+                {/* File Size Limit */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Max File Size ({settings.maxFileSize} MB)
+                  </label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={settings.maxFileSize}
+                    onChange={(e) => handleSettingChange('maxFileSize', parseInt(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Content Processing Options */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Include Metadata</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.includeMetadata}
+                      onChange={(e) => handleSettingChange('includeMetadata', e.target.checked)}
+                      className="rounded"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Preserve Formatting</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.preserveFormatting}
+                      onChange={(e) => handleSettingChange('preserveFormatting', e.target.checked)}
+                      className="rounded"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Remove Empty Lines</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.removeEmptyLines}
+                      onChange={(e) => handleSettingChange('removeEmptyLines', e.target.checked)}
+                      className="rounded"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Normalize Whitespace</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.normalizeWhitespace}
+                      onChange={(e) => handleSettingChange('normalizeWhitespace', e.target.checked)}
+                      className="rounded"
+                    />
+                  </div>
+                </div>
+
+                {/* Content Separator */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Content Separator
+                  </label>
+                  <select
+                    value={settings.contentSeparator}
+                    onChange={(e) => handleSettingChange('contentSeparator', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  >
+                    <option value="\n\n">Double Newline</option>
+                    <option value="\n">Single Newline</option>
+                    <option value=" ">Space</option>
+                    <option value="---">Separator Line</option>
+                  </select>
+                </div>
+
+                {/* Supported Formats */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Supported Formats
+                  </label>
+                  <div className="grid grid-cols-4 gap-1 text-xs">
+                    {['txt', 'md', 'js', 'jsx', 'ts', 'tsx', 'py', 'json', 'xml', 'html', 'css', 'yaml'].map(format => (
+                      <div
+                        key={format}
+                        className={`px-2 py-1 rounded text-center cursor-pointer transition-colors ${
+                          settings.supportedFormats.includes(format)
+                            ? 'bg-slate-200 text-slate-800'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        onClick={() => {
+                          const newFormats = settings.supportedFormats.includes(format)
+                            ? settings.supportedFormats.filter(f => f !== format)
+                            : [...settings.supportedFormats, format];
+                          handleSettingChange('supportedFormats', newFormats);
+                        }}
+                      >
+                        {format}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Processing Indicator */}
+        {isProcessing && (
+          <div className="relative z-10 p-4">
+            <div className="flex items-center justify-center space-x-2 text-sm text-slate-600">
+              <div className="animate-spin w-4 h-4 border-2 border-slate-600 border-t-transparent rounded-full"></div>
+              <span>Parsing files...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Content Preview */}
+        {parsedContent && (
+          <div className="relative z-10 p-4 border-t border-gray-100">
+            <h4 className="text-xs font-medium text-gray-700 mb-2">Content Preview</h4>
+            <div className="max-h-32 overflow-y-auto">
+              <div className="text-xs text-gray-600 bg-white px-2 py-1 rounded border">
+                <div className="font-medium">
+                  {parsedContent.length} characters from {processedFiles.length} files
+                </div>
+                <div className="truncate mt-1">
+                  {parsedContent.substring(0, 100)}...
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 };
 

@@ -1,1066 +1,758 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
-import PlayButton from '../../ui/PlayButton';
 
-// Simplified Background Beams (fixed pointer events)
 const BackgroundBeams = ({ className }) => (
-  <div className={`absolute inset-0 pointer-events-none ${className}`}>
-    <svg
-      className="absolute inset-0 h-full w-full opacity-20"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <pattern
-          id="filter-beams"
-          x="0"
-          y="0"
-          width="40"
-          height="40"
-          patternUnits="userSpaceOnUse"
-        >
-          <path
-            d="M0 40L40 0H20L0 20M40 40V20L20 40"
-            stroke="rgba(156, 163, 175, 0.1)"
-            fill="none"
-          />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#filter-beams)" />
-    </svg>
+  <div className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/20 via-blue-50/20 to-sky-50/20" />
+    <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-indigo-200/30 to-transparent" />
+    <div className="absolute top-1/4 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-200/30 to-transparent" />
   </div>
 );
 
-// Simplified floating icon (reduced animation)
-const FloatingIcon = ({ children, isProcessing }) => (
-  <motion.div
-    animate={{
-      y: [0, -2, 0],
-      rotate: isProcessing ? 360 : 0,
-    }}
-    transition={{
-      y: { duration: 4, repeat: Infinity, ease: "easeInOut" },
-      rotate: {
-        duration: isProcessing ? 2 : 0,
-        repeat: isProcessing ? Infinity : 0,
-        ease: "linear"
-      }
-    }}
-  >
-    {children}
-  </motion.div>
-);
+// Hierarchical Folder Tree Component
+const FolderTree = ({ files, selectedFolders, onFolderToggle, expandedFolders, onFolderExpand }) => {
+  // Build folder hierarchy from files
+  const folderHierarchy = useMemo(() => {
+    const hierarchy = {};
 
-const FilterNode = ({ id, data, isConnectable, selected }) => {
-  const [inputData, setInputData] = useState(data?.inputData || null);
-  const [filteredData, setFilteredData] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [error, setError] = useState(null);
+    files.forEach(file => {
+      const path = file.path || file.name || '';
+      const pathParts = path.split('/').filter(part => part);
 
-  const [selectedFolders, setSelectedFolders] = useState(new Set());
-  const [selectedFormats, setSelectedFormats] = useState(new Set());
-  const [folderSearchTerm, setFolderSearchTerm] = useState('');
-  const [formatSearchTerm, setFormatSearchTerm] = useState('');
-  const [includeRootFiles, setIncludeRootFiles] = useState(true);
-  const [showUnknownFormats, setShowUnknownFormats] = useState(true);
+      let current = hierarchy;
+      let currentPath = '';
 
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const nodeRef = useRef(null);
-  const applyButtonRef = useRef(null);
-  const isInitializedRef = useRef(false);
-  const updateTimeoutRef = useRef(null);
+      pathParts.forEach((part, index) => {
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
 
-  // **CHAIN REACTION FUNCTIONALITY**
-  const triggerNextNodes = useCallback(async (currentNodeId) => {
-    const edges = getEdges();
-    const nodes = getNodes();
-
-    const outgoingEdges = edges.filter(edge => edge.source === currentNodeId);
-
-    if (outgoingEdges.length > 0) {
-      console.log(`🔗 FilterNode: Found ${outgoingEdges.length} connected node(s) to trigger`);
-
-      for (let i = 0; i < outgoingEdges.length; i++) {
-        const edge = outgoingEdges[i];
-        const targetNode = nodes.find(node => node.id === edge.target);
-
-        if (targetNode) {
-          console.log(`🎯 FilterNode: Triggering ${targetNode.type} node ${edge.target}`);
-
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('triggerExecution', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('triggerPlayButton', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-
-            window.dispatchEvent(new CustomEvent('autoExecute', {
-              detail: { nodeId: edge.target, sourceNodeId: currentNodeId }
-            }));
-          }, i * 500);
+        if (!current[part]) {
+          current[part] = {
+            name: part,
+            fullPath: currentPath,
+            isFolder: index < pathParts.length - 1,
+            children: {},
+            files: []
+          };
         }
-      }
-    } else {
-      console.log(`⏹️ FilterNode: No connected nodes found after filtering`);
-    }
-  }, [getEdges, getNodes]);
 
-  // Known formats map
-  const knownFormats = useMemo(() => new Map([
-    ['js', { icon: '🟨', category: 'Programming', description: 'JavaScript' }],
-    ['jsx', { icon: '⚛️', category: 'Programming', description: 'React JSX' }],
-    ['ts', { icon: '🔷', category: 'Programming', description: 'TypeScript' }],
-    ['tsx', { icon: '⚛️', category: 'Programming', description: 'React TypeScript' }],
-    ['py', { icon: '🐍', category: 'Programming', description: 'Python' }],
-    ['java', { icon: '☕', category: 'Programming', description: 'Java' }],
-    ['cpp', { icon: '⚙️', category: 'Programming', description: 'C++' }],
-    ['c', { icon: '⚙️', category: 'Programming', description: 'C' }],
-    ['h', { icon: '📋', category: 'Programming', description: 'C/C++ Header' }],
-    ['hpp', { icon: '📋', category: 'Programming', description: 'C++ Header' }],
-    ['cs', { icon: '🔷', category: 'Programming', description: 'C#' }],
-    ['php', { icon: '🐘', category: 'Programming', description: 'PHP' }],
-    ['rb', { icon: '💎', category: 'Programming', description: 'Ruby' }],
-    ['go', { icon: '🐹', category: 'Programming', description: 'Go' }],
-    ['rs', { icon: '🦀', category: 'Programming', description: 'Rust' }],
-    ['sh', { icon: '🐚', category: 'Programming', description: 'Shell Script' }],
-    ['bat', { icon: '🦇', category: 'Programming', description: 'Batch File' }],
-    ['html', { icon: '🌐', category: 'Web', description: 'HTML' }],
-    ['css', { icon: '🎨', category: 'Web', description: 'CSS' }],
-    ['scss', { icon: '🎨', category: 'Web', description: 'SASS' }],
-    ['vue', { icon: '💚', category: 'Web', description: 'Vue.js' }],
-    ['json', { icon: '📋', category: 'Data', description: 'JSON' }],
-    ['xml', { icon: '📄', category: 'Data', description: 'XML' }],
-    ['csv', { icon: '📊', category: 'Data', description: 'CSV' }],
-    ['sql', { icon: '🗄️', category: 'Data', description: 'SQL' }],
-    ['yml', { icon: '⚙️', category: 'Config', description: 'YAML' }],
-    ['yaml', { icon: '⚙️', category: 'Config', description: 'YAML' }],
-    ['toml', { icon: '⚙️', category: 'Config', description: 'TOML' }],
-    ['ini', { icon: '⚙️', category: 'Config', description: 'INI' }],
-    ['env', { icon: '🔐', category: 'Config', description: 'Environment' }],
-    ['md', { icon: '📝', category: 'Documentation', description: 'Markdown' }],
-    ['txt', { icon: '📄', category: 'Documentation', description: 'Text' }],
-    ['png', { icon: '🖼️', category: 'Image', description: 'PNG' }],
-    ['jpg', { icon: '🖼️', category: 'Image', description: 'JPEG' }],
-    ['jpeg', { icon: '🖼️', category: 'Image', description: 'JPEG' }],
-    ['gif', { icon: '🖼️', category: 'Image', description: 'GIF' }],
-    ['svg', { icon: '🎨', category: 'Image', description: 'SVG' }],
-    ['pdf', { icon: '📕', category: 'Document', description: 'PDF' }],
-    ['doc', { icon: '📄', category: 'Document', description: 'Word Document' }],
-    ['docx', { icon: '📄', category: 'Document', description: 'Word Document' }],
-    ['gitignore', { icon: '🚫', category: 'Config', description: 'Git Ignore' }],
-    ['dockerfile', { icon: '🐳', category: 'Config', description: 'Docker' }],
-    ['license', { icon: '📜', category: 'Documentation', description: 'License' }],
-    ['readme', { icon: '📖', category: 'Documentation', description: 'README' }],
-    ['makefile', { icon: '🔨', category: 'Build', description: 'Makefile' }],
-    ['package', { icon: '📦', category: 'Package', description: 'Package' }],
-    ['lock', { icon: '🔒', category: 'Package', description: 'Lock File' }],
-  ]), []);
-
-  const handleDelete = useCallback((e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('deleteNode', { detail: { id } }));
-  }, [id]);
-
-  const handleInteractionEvent = useCallback((e) => {
-    e.stopPropagation();
-  }, []);
-
-  // **DEBOUNCED NODE DATA UPDATE**
-  useEffect(() => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(() => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                inputData,
-                filteredData,
-                selectedFolders: Array.from(selectedFolders),
-                selectedFormats: Array.from(selectedFormats),
-                includeRootFiles,
-                showUnknownFormats,
-                lastUpdated: new Date().toISOString()
-              }
-            };
-          }
-          return node;
-        })
-      );
-    }, 1000);
-
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, [inputData, filteredData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id, setNodes]);
-
-  // **LISTEN FOR DATA FROM CONNECTED GITNODE**
-  useEffect(() => {
-    if (isInitializedRef.current) return;
-
-    const checkForInputData = () => {
-      try {
-        const edges = getEdges();
-        const nodes = getNodes();
-
-        const incomingEdges = edges.filter(edge => edge.target === id);
-
-        if (incomingEdges.length > 0) {
-          const sourceEdge = incomingEdges[0];
-          const sourceNode = nodes.find(node => node.id === sourceEdge.source);
-
-          if (sourceNode && sourceNode.data && sourceNode.data.repoData) {
-            console.log(`📥 FilterNode ${id}: Received repository data from GitNode`);
-            setInputData(sourceNode.data.repoData);
-          }
+        if (index === pathParts.length - 1) {
+          // This is a file
+          current[part].files.push(file);
+        } else {
+          // This is a folder
+          current = current[part].children;
         }
-      } catch (error) {
-        console.error(`❌ FilterNode ${id}: Error checking input data:`, error);
-      }
-    };
+      });
+    });
 
-    checkForInputData();
-    isInitializedRef.current = true;
-  }, [getEdges, getNodes, id]);
+    return hierarchy;
+  }, [files]);
 
-  // Filtered folders
-  const filteredFolders = useMemo(() => {
-    if (!inputData || !inputData.contents) return [];
+  const renderFolderNode = (node, depth = 0) => {
+    const isExpanded = expandedFolders.has(node.fullPath);
+    const isSelected = selectedFolders.has(node.fullPath);
+    const hasChildren = Object.keys(node.children).length > 0;
 
-    const folders = inputData.contents.filter(item => item.type === 'folder');
-    const foldersWithRoot = [
-      { name: '📁 Root Directory', path: '', type: 'folder' },
-      ...folders
-    ];
+    return (
+      <div key={node.fullPath} className="select-none">
+        <div
+          className={`flex items-center py-1 px-2 hover:bg-gray-100 cursor-pointer text-xs ${
+            isSelected ? 'bg-indigo-100 text-indigo-800' : 'text-gray-700'
+          }`}
+          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          onClick={() => onFolderToggle(node.fullPath)}
+        >
+          {hasChildren && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFolderExpand(node.fullPath);
+              }}
+              className="mr-1 w-4 h-4 flex items-center justify-center hover:bg-gray-200 rounded"
+            >
+              {isExpanded ? '▼' : '▶'}
+            </button>
+          )}
+          {!hasChildren && <div className="w-5" />}
+          <span className="mr-2">{hasChildren ? '📁' : '📄'}</span>
+          <span className="truncate">{node.name}</span>
+          {node.files.length > 0 && (
+            <span className="ml-auto text-gray-500">({node.files.length})</span>
+          )}
+        </div>
 
-    if (!folderSearchTerm) return foldersWithRoot;
-
-    return foldersWithRoot.filter(folder =>
-      folder.name.toLowerCase().includes(folderSearchTerm.toLowerCase()) ||
-      folder.path.toLowerCase().includes(folderSearchTerm.toLowerCase())
+        {hasChildren && isExpanded && (
+          <div>
+            {Object.values(node.children).map(child => renderFolderNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
     );
-  }, [inputData, folderSearchTerm]);
+  };
 
-  // Format detection
-  const availableFormats = useMemo(() => {
-    if (!inputData || !inputData.contents) {
-      return [];
-    }
+  return (
+    <div className="max-h-48 overflow-y-auto border border-gray-200 rounded bg-white">
+      {Object.values(folderHierarchy).map(node => renderFolderNode(node))}
+    </div>
+  );
+};
 
-    const formatMap = new Map();
-    let filesToProcess = [];
+// File Format Selection Component
+const FileFormatSelector = ({ availableFormats, selectedFormats, onFormatToggle, onSelectAll, onSelectNone }) => {
+  const formatCategories = useMemo(() => {
+    const categories = {
+      code: { name: 'Code Files', icon: '💻', formats: [] },
+      text: { name: 'Text Files', icon: '📝', formats: [] },
+      data: { name: 'Data Files', icon: '📊', formats: [] },
+      config: { name: 'Config Files', icon: '⚙️', formats: [] },
+      other: { name: 'Other Files', icon: '📄', formats: [] }
+    };
 
-    try {
-      if (selectedFolders.size === 0) {
-        if (includeRootFiles) {
-          filesToProcess = inputData.contents.filter(item =>
-            item.type === 'file' && !item.path.includes('/')
-          );
-        } else {
-          filesToProcess = inputData.contents.filter(item => item.type === 'file');
-        }
+    availableFormats.forEach(format => {
+      const ext = format.toLowerCase();
+      if (['js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'cs', 'php', 'rb', 'go', 'rs', 'kt', 'swift'].includes(ext)) {
+        categories.code.formats.push(format);
+      } else if (['txt', 'md', 'markdown', 'rst', 'adoc'].includes(ext)) {
+        categories.text.formats.push(format);
+      } else if (['json', 'xml', 'csv', 'yaml', 'yml', 'toml'].includes(ext)) {
+        categories.data.formats.push(format);
+      } else if (['gitignore', 'gitattributes', 'dockerfile', 'makefile', 'gradle', 'properties', 'ini', 'conf'].includes(ext)) {
+        categories.config.formats.push(format);
       } else {
-        selectedFolders.forEach(folderPath => {
-          if (folderPath === '') {
-            const rootFiles = inputData.contents.filter(item =>
-              item.type === 'file' && !item.path.includes('/')
-            );
-            filesToProcess.push(...rootFiles);
-          } else {
-            const folderFiles = inputData.contents.filter(item =>
-              item.type === 'file' && item.path.startsWith(folderPath + '/')
-            );
-            filesToProcess.push(...folderFiles);
-          }
-        });
+        categories.other.formats.push(format);
       }
+    });
 
-      const limitedFiles = filesToProcess.slice(0, 1000);
+    return Object.entries(categories).filter(([_, cat]) => cat.formats.length > 0);
+  }, [availableFormats]);
 
-      limitedFiles.forEach(file => {
-        let formatKey = null;
-        let formatInfo = null;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="text-xs font-medium text-gray-700">
+          File Formats ({selectedFormats.size}/{availableFormats.length})
+        </span>
+        <div className="flex space-x-2">
+          <button
+            onClick={onSelectAll}
+            className="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+          >
+            All
+          </button>
+          <button
+            onClick={onSelectNone}
+            className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+          >
+            None
+          </button>
+        </div>
+      </div>
 
-        const fileName = file.name.toLowerCase();
+      <div className="max-h-40 overflow-y-auto space-y-2">
+        {formatCategories.map(([categoryKey, category]) => (
+          <div key={categoryKey} className="border border-gray-200 rounded">
+            <div className="px-2 py-1 bg-gray-50 border-b border-gray-200">
+              <span className="text-xs font-medium text-gray-700">
+                {category.icon} {category.name} ({category.formats.length})
+              </span>
+            </div>
+            <div className="p-2 grid grid-cols-3 gap-1">
+              {category.formats.map(format => (
+                <label key={format} className="flex items-center space-x-1 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedFormats.has(format)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onFormatToggle(format, e.target.checked);
+                    }}
+                    className="rounded text-xs"
+                    style={{ transform: 'scale(0.8)' }}
+                  />
+                  <span className="text-xs">.{format}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
-        // Special files
-        if (fileName === 'dockerfile') {
-          formatKey = 'dockerfile';
-          formatInfo = knownFormats.get('dockerfile');
-        } else if (fileName.startsWith('readme')) {
-          formatKey = 'readme';
-          formatInfo = knownFormats.get('readme');
-        } else if (fileName === 'license' || fileName === 'licence') {
-          formatKey = 'license';
-          formatInfo = knownFormats.get('license');
-        } else if (fileName === '.gitignore') {
-          formatKey = 'gitignore';
-          formatInfo = knownFormats.get('gitignore');
-        } else if (fileName === 'makefile') {
-          formatKey = 'makefile';
-          formatInfo = knownFormats.get('makefile');
-        } else if (fileName === 'package.json') {
-          formatKey = 'package';
-          formatInfo = knownFormats.get('package');
-        } else if (fileName.endsWith('.lock')) {
-          formatKey = 'lock';
-          formatInfo = knownFormats.get('lock');
-        } else {
-          const parts = file.name.split('.');
-          if (parts.length > 1) {
-            const ext = parts[parts.length - 1].toLowerCase();
-            formatKey = ext;
-            formatInfo = knownFormats.get(ext) || {
-              icon: '❓',
-              category: 'Unknown',
-              description: `${ext.toUpperCase()} File`
-            };
-          } else {
-            formatKey = 'no-extension';
-            formatInfo = {
-              icon: '📄',
-              category: 'Other',
-              description: 'No Extension'
-            };
-          }
-        }
+const FilterNode = ({ id, data, selected }) => {
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
 
-        if (formatKey && formatInfo) {
-          if (!formatMap.has(formatKey)) {
-            formatMap.set(formatKey, {
-              ext: formatKey,
-              ...formatInfo,
-              count: 0,
-              isKnown: knownFormats.has(formatKey)
-            });
-          }
-          const format = formatMap.get(formatKey);
-          format.count++;
-        }
-      });
+  // State management
+  const [showSettings, setShowSettings] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [connectedInputData, setConnectedInputData] = useState(null);
+  const [filteredFiles, setFilteredFiles] = useState([]);
 
-      const formats = Array.from(formatMap.values());
-      formats.sort((a, b) => {
-        if (b.count !== a.count) return b.count - a.count;
-        return a.ext.localeCompare(b.ext);
-      });
+  // Hierarchical selection state
+  const [selectedFolders, setSelectedFolders] = useState(new Set());
+  const [expandedFolders, setExpandedFolders] = useState(new Set([''])); // Root expanded by default
+  const [selectedFormats, setSelectedFormats] = useState(new Set());
+  const [availableFormats, setAvailableFormats] = useState([]);
 
-      return formats;
-    } catch (error) {
-      console.error(`❌ FilterNode ${id}: Error in format detection:`, error);
-      return [];
-    }
-  }, [inputData, selectedFolders, includeRootFiles, knownFormats]);
+  // Filter settings
+  const [settings, setSettings] = useState({
+    filterMode: data.filterMode || 'include',
+    maxFileSize: data.maxFileSize || 5, // MB
+    minFileSize: data.minFileSize || 0, // KB
+    useInputData: data.useInputData !== false,
+    caseSensitive: data.caseSensitive || false,
+    filterByContent: data.filterByContent || false,
+    contentKeywords: data.contentKeywords || [],
+    preserveStructure: data.preserveStructure !== false,
+    enableSmartFiltering: data.enableSmartFiltering !== false,
+    useHierarchicalSelection: data.useHierarchicalSelection !== false,
+  });
 
-  // Filter formats by search and unknown toggle
-  const displayFormats = useMemo(() => {
-    let filtered = availableFormats;
+  const [stats, setStats] = useState({
+    totalFiles: 0,
+    filteredFiles: 0,
+    excludedFiles: 0,
+    processingTime: 0,
+    lastFiltered: null,
+    totalSize: 0,
+    filteredSize: 0,
+    selectedFolders: 0,
+    selectedFormats: 0,
+  });
 
-    if (formatSearchTerm) {
-      filtered = filtered.filter(format =>
-        format.ext.toLowerCase().includes(formatSearchTerm.toLowerCase()) ||
-        format.description.toLowerCase().includes(formatSearchTerm.toLowerCase()) ||
-        format.category.toLowerCase().includes(formatSearchTerm.toLowerCase())
+  // Get input data from connected nodes
+  const getInputData = useCallback(() => {
+    try {
+      const edges = getEdges();
+      const nodes = getNodes();
+
+      console.log('🔍 FilterNode looking for input data...');
+
+      const inputEdge = edges.find(edge =>
+        edge.target === id && edge.targetHandle === 'input'
       );
+
+      if (inputEdge) {
+        const inputNode = nodes.find(node => node.id === inputEdge.source);
+
+        if (inputNode && inputNode.data) {
+          let inputData = {
+            files: [],
+            metadata: {},
+            nodeType: inputNode.type
+          };
+
+          switch (inputNode.type) {
+            case 'gitNode':
+              inputData.files = inputNode.data.repositoryFiles ||
+                                inputNode.data.files ||
+                                inputNode.data.fetchedFiles ||
+                                inputNode.data.output ||
+                                [];
+              inputData.metadata = {
+                source: 'git_node',
+                repository: inputNode.data.repository || '',
+                branch: inputNode.data.branch || 'main',
+                totalFiles: inputNode.data.stats?.fetchedFiles || inputData.files.length,
+                platform: inputNode.data.platform || 'github'
+              };
+              break;
+
+            case 'textNode':
+              if (inputNode.data.text || inputNode.data.content) {
+                const content = inputNode.data.text || inputNode.data.content;
+                inputData.files = [{
+                  name: 'text_input.txt',
+                  filename: 'text_input.txt',
+                  content: content,
+                  text: content,
+                  path: 'text_input.txt',
+                  type: 'text/plain',
+                  size: content.length,
+                  extension: 'txt'
+                }];
+              }
+              inputData.metadata = {
+                source: 'text_node'
+              };
+              break;
+
+            default:
+              inputData.files = inputNode.data.files ||
+                                inputNode.data.output ||
+                                [];
+              inputData.metadata = {
+                source: inputNode.type || 'unknown'
+              };
+          }
+
+          setConnectedInputData(inputData);
+
+          // Auto-detect available formats
+          const formats = new Set();
+          inputData.files.forEach(file => {
+            const fileName = file.name || file.filename || '';
+            const extension = fileName.split('.').pop()?.toLowerCase();
+            if (extension && extension !== fileName.toLowerCase()) {
+              formats.add(extension);
+            }
+          });
+          setAvailableFormats(Array.from(formats).sort());
+
+          return inputData;
+        }
+      }
+
+      setConnectedInputData(null);
+      return { files: [], metadata: {}, nodeType: null };
+    } catch (error) {
+      console.error('❌ Error getting input data:', error);
+      setConnectedInputData(null);
+      return { files: [], metadata: {}, nodeType: null };
+    }
+  }, [id, getNodes, getEdges]);
+
+  // Monitor for input data changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      getInputData();
+    }, 2000);
+
+    getInputData();
+    return () => clearInterval(interval);
+  }, [getInputData]);
+
+  // Update node data when settings or filtered files change
+  useEffect(() => {
+    const filteredContent = filteredFiles
+      .map(file => file.content || file.text || '')
+      .filter(content => content.trim().length > 0)
+      .join('\n\n');
+
+    const totalFilteredSize = filteredFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+
+    updateNodeData(id, {
+      ...settings,
+      stats: {
+        ...stats,
+        filteredSize: totalFilteredSize,
+        selectedFolders: selectedFolders.size,
+        selectedFormats: selectedFormats.size,
+      },
+      connectedInputData,
+
+      // Store filtered data in multiple formats for compatibility
+      filteredFiles: filteredFiles,
+      files: filteredFiles,
+      selectedFiles: filteredFiles,
+      output: filteredFiles,
+      processedFiles: filteredFiles,
+
+      // Content data
+      filteredContent: filteredContent,
+      content: filteredContent,
+      text: filteredContent,
+      extractedText: filteredContent,
+
+      // Selection metadata
+      selectedFolders: Array.from(selectedFolders),
+      selectedFormats: Array.from(selectedFormats),
+
+      lastUpdated: Date.now()
+    });
+  }, [settings, stats, connectedInputData, filteredFiles, selectedFolders, selectedFormats, id, updateNodeData]);
+
+  // Handle setting changes
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+  };
+
+  // Folder selection handlers
+  const handleFolderToggle = (folderPath) => {
+    const newSelected = new Set(selectedFolders);
+    if (newSelected.has(folderPath)) {
+      newSelected.delete(folderPath);
+    } else {
+      newSelected.add(folderPath);
+    }
+    setSelectedFolders(newSelected);
+  };
+
+  const handleFolderExpand = (folderPath) => {
+    const newExpanded = new Set(expandedFolders);
+    if (newExpanded.has(folderPath)) {
+      newExpanded.delete(folderPath);
+    } else {
+      newExpanded.add(folderPath);
+    }
+    setExpandedFolders(newExpanded);
+  };
+
+  // Format selection handlers
+  const handleFormatToggle = (format, isSelected) => {
+    const newSelected = new Set(selectedFormats);
+    if (isSelected) {
+      newSelected.add(format);
+    } else {
+      newSelected.delete(format);
+    }
+    setSelectedFormats(newSelected);
+  };
+
+  const handleSelectAllFormats = () => {
+    setSelectedFormats(new Set(availableFormats));
+  };
+
+  const handleSelectNoFormats = () => {
+    setSelectedFormats(new Set());
+  };
+
+  // Enhanced filter logic with hierarchical selection
+  const shouldIncludeFile = useCallback((file) => {
+    const fileName = file.name || file.filename || '';
+    const filePath = file.path || fileName;
+    const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
+    const fileSize = file.size || 0;
+    const fileContent = file.content || file.text || '';
+
+    // Size filters
+    if (fileSize > settings.maxFileSize * 1024 * 1024) return false;
+    if (fileSize < settings.minFileSize * 1024) return false;
+
+    // Hierarchical folder selection
+    if (settings.useHierarchicalSelection && selectedFolders.size > 0) {
+      const fileFolder = filePath.substring(0, filePath.lastIndexOf('/')) || '';
+      const isInSelectedFolder = Array.from(selectedFolders).some(folder =>
+        filePath.startsWith(folder) || folder === '' // Root folder
+      );
+      if (!isInSelectedFolder) return false;
     }
 
-    if (!showUnknownFormats) {
-      filtered = filtered.filter(format => format.isKnown);
+    // Format selection
+    if (selectedFormats.size > 0) {
+      if (!selectedFormats.has(fileExtension)) return false;
     }
 
-    return filtered;
-  }, [availableFormats, formatSearchTerm, showUnknownFormats]);
-
-  // Group formats by category for display
-  const groupedFormats = useMemo(() => {
-    const groups = new Map();
-
-    displayFormats.forEach(format => {
-      if (!groups.has(format.category)) {
-        groups.set(format.category, []);
+    // Content keyword filter
+    if (settings.filterByContent && settings.contentKeywords.length > 0) {
+      let hasKeyword = false;
+      for (const keyword of settings.contentKeywords) {
+        const regex = new RegExp(keyword, settings.caseSensitive ? 'g' : 'gi');
+        if (regex.test(fileContent)) {
+          hasKeyword = true;
+          break;
+        }
       }
-      groups.get(format.category).push(format);
-    });
+      if (!hasKeyword) return false;
+    }
 
-    const sortedGroups = new Map();
-    const categoryOrder = ['Programming', 'Web', 'Data', 'Config', 'Documentation', 'Image', 'Document', 'Build', 'Package', 'Unknown', 'Other'];
+    return true;
+  }, [settings, selectedFolders, selectedFormats]);
 
-    categoryOrder.forEach(category => {
-      if (groups.has(category)) {
-        sortedGroups.set(category, groups.get(category));
-      }
-    });
+  // Main filtering process
+  const processFiltering = useCallback(async () => {
+    const { files: inputFiles } = getInputData();
 
-    return sortedGroups;
-  }, [displayFormats]);
-
-  // **APPLY FILTERS WITH CHAIN REACTION**
-  const applyFilters = useCallback(async () => {
-    if (!inputData || !inputData.contents) {
-      console.log(`⚠️ FilterNode ${id}: No data to filter`);
+    if (!inputFiles || inputFiles.length === 0) {
+      alert('Please connect a node with files to filter');
       return;
     }
 
     setIsProcessing(true);
-    console.log(`🔍 FilterNode ${id}: Applying filters`);
+    const startTime = Date.now();
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 400));
+      console.log('🚀 Starting hierarchical filtering...');
+      console.log('📁 Files to filter:', inputFiles.length);
+      console.log('📂 Selected folders:', Array.from(selectedFolders));
+      console.log('📄 Selected formats:', Array.from(selectedFormats));
 
-      let filtered = [...inputData.contents];
+      const filtered = inputFiles.filter(shouldIncludeFile);
+      const processingTime = Date.now() - startTime;
+      const totalInputSize = inputFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+      const totalFilteredSize = filtered.reduce((sum, file) => sum + (file.size || 0), 0);
 
-      // Apply folder filtering
-      if (selectedFolders.size > 0) {
-        filtered = filtered.filter(item => {
-          if (item.type === 'folder') {
-            return selectedFolders.has(item.path);
-          } else {
-            return Array.from(selectedFolders).some(folderPath => {
-              if (folderPath === '') {
-                return !item.path.includes('/');
-              }
-              return item.path.startsWith(folderPath + '/');
-            });
-          }
-        });
-      } else if (includeRootFiles) {
-        filtered = filtered.filter(item => {
-          if (item.type === 'folder') return false;
-          return !item.path.includes('/');
-        });
-      }
-
-      // Apply format filtering
-      if (selectedFormats.size > 0) {
-        filtered = filtered.filter(item => {
-          if (item.type === 'folder') return true;
-
-          const fileName = item.name.toLowerCase();
-          const ext = item.name.split('.').pop()?.toLowerCase();
-
-          // Check special files
-          if (selectedFormats.has('dockerfile') && fileName === 'dockerfile') return true;
-          if (selectedFormats.has('readme') && fileName.startsWith('readme')) return true;
-          if (selectedFormats.has('license') && (fileName === 'license' || fileName === 'licence')) return true;
-          if (selectedFormats.has('gitignore') && fileName === '.gitignore') return true;
-          if (selectedFormats.has('makefile') && fileName === 'makefile') return true;
-          if (selectedFormats.has('package') && fileName === 'package.json') return true;
-          if (selectedFormats.has('lock') && fileName.endsWith('.lock')) return true;
-          if (selectedFormats.has('no-extension') && !item.name.includes('.')) return true;
-
-          return ext && selectedFormats.has(ext);
-        });
-      }
-
-      const result = {
-        ...inputData,
-        contents: filtered,
-        originalCount: inputData.contents.length,
-        filteredCount: filtered.length,
-        filterSettings: {
-          selectedFolders: Array.from(selectedFolders),
-          selectedFormats: Array.from(selectedFormats),
-          includeRootFiles,
-          showUnknownFormats
-        },
-        filteredAt: new Date().toISOString()
+      const newStats = {
+        totalFiles: inputFiles.length,
+        filteredFiles: filtered.length,
+        excludedFiles: inputFiles.length - filtered.length,
+        processingTime,
+        lastFiltered: Date.now(),
+        totalSize: totalInputSize,
+        filteredSize: totalFilteredSize,
+        selectedFolders: selectedFolders.size,
+        selectedFormats: selectedFormats.size,
       };
 
-      setFilteredData(result);
-      console.log(`✨ FilterNode ${id}: Complete! ${inputData.contents.length} → ${filtered.length} items`);
+      setStats(newStats);
+      setFilteredFiles(filtered);
 
-      // **TRIGGER NEXT NODES**
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await triggerNextNodes(id);
+      console.log('✅ Hierarchical filtering completed successfully');
 
     } catch (error) {
-      console.error(`❌ FilterNode ${id}: Error during filtering:`, error);
-      setError(`Filtering failed: ${error.message}`);
+      console.error('❌ Filtering error:', error);
+      alert(`Filtering failed: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
-  }, [inputData, selectedFolders, selectedFormats, includeRootFiles, showUnknownFormats, id, triggerNextNodes]);
-
-  // **NODE EXECUTION HANDLER**
-  const handleNodeExecution = useCallback(async (inputData) => {
-    console.log(`🎯 FilterNode ${id}: Executing with input data:`, inputData);
-
-    try {
-      Object.values(inputData).forEach(data => {
-        if (data.repoData) {
-          console.log(`📥 FilterNode ${id}: Processing repo data from connected GitNode`);
-          setInputData(data.repoData);
-        }
-      });
-
-      if (inputData && Object.keys(inputData).length > 0) {
-        console.log(`🔄 FilterNode ${id}: Auto-applying filters after receiving data`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        if (applyButtonRef.current && !isProcessing) {
-          console.log(`✅ FilterNode ${id}: Triggering apply filters button`);
-          applyButtonRef.current.click();
-        } else {
-          console.log(`🔄 FilterNode ${id}: Direct filter application`);
-          await applyFilters();
-        }
-      }
-    } catch (error) {
-      console.error(`❌ FilterNode ${id}: Error during execution:`, error);
-    }
-  }, [id, applyFilters, isProcessing]);
-
-  const toggleFolder = useCallback((folderPath) => {
-    setSelectedFolders(prev => {
-      const newSelected = new Set(prev);
-      if (newSelected.has(folderPath)) {
-        newSelected.delete(folderPath);
-      } else {
-        newSelected.add(folderPath);
-      }
-      return newSelected;
-    });
-  }, []);
-
-  const toggleFormat = useCallback((format) => {
-    setSelectedFormats(prev => {
-      const newSelected = new Set(prev);
-      if (newSelected.has(format)) {
-        newSelected.delete(format);
-      } else {
-        newSelected.add(format);
-      }
-      return newSelected;
-    });
-  }, []);
-
-  const selectAllFolders = useCallback(() => {
-    const allFolderPaths = new Set(filteredFolders.map(folder => folder.path));
-    setSelectedFolders(allFolderPaths);
-  }, [filteredFolders]);
-
-  const clearAllFolders = useCallback(() => {
-    setSelectedFolders(new Set());
-  }, []);
-
-  const selectAllFormats = useCallback(() => {
-    const allFormats = new Set(displayFormats.map(format => format.ext));
-    setSelectedFormats(allFormats);
-  }, [displayFormats]);
-
-  const clearAllFormats = useCallback(() => {
-    setSelectedFormats(new Set());
-  }, []);
-
-  // **AUTO-EXECUTION EVENT LISTENER**
-  useEffect(() => {
-    const handleAutoExecution = (event) => {
-      if (event.detail.nodeId === id) {
-        console.log(`🎯 FilterNode ${id}: Auto-triggered for execution`);
-
-        if (applyButtonRef.current && !isProcessing && inputData) {
-          console.log(`✅ FilterNode ${id}: Triggering apply filters button click`);
-          applyButtonRef.current.click();
-          return;
-        }
-
-        if (inputData && !isProcessing) {
-          console.log(`✅ FilterNode ${id}: Direct function call for auto-execution`);
-          applyFilters();
-        } else {
-          console.log(`⚠️ FilterNode ${id}: Cannot auto-execute - no input data available or processing`);
-        }
-      }
-    };
-
-    window.addEventListener('triggerExecution', handleAutoExecution);
-    window.addEventListener('triggerPlayButton', handleAutoExecution);
-    window.addEventListener('autoExecute', handleAutoExecution);
-
-    return () => {
-      window.removeEventListener('triggerExecution', handleAutoExecution);
-      window.removeEventListener('triggerPlayButton', handleAutoExecution);
-      window.removeEventListener('autoExecute', handleAutoExecution);
-    };
-  }, [id, inputData, isProcessing, applyFilters]);
+  }, [getInputData, shouldIncludeFile, selectedFolders, selectedFormats]);
 
   return (
-    <motion.div
-      ref={nodeRef}
-      className={`relative w-80 bg-gradient-to-br from-indigo-50 via-blue-50 to-sky-50 border-2 border-indigo-200 rounded-xl shadow-lg group nowheel overflow-visible ${
-        selected ? 'ring-2 ring-indigo-300' : ''
-      }`}
-      style={{ minHeight: '500px' }}
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onPointerDown={(e) => {
-        if (e.target.closest('input, button, select, .nowheel')) {
-          e.stopPropagation();
-        }
-      }}
-      whileHover={{
-        scale: 1.01,
-        boxShadow: "0 10px 25px rgba(0, 0, 0, 0.1)"
-      }}
-    >
-      {/* Background Beams when processing */}
-      <AnimatePresence>
-        {isProcessing && (
-          <BackgroundBeams className="opacity-20" />
-        )}
-      </AnimatePresence>
-
-      {/* **FIXED: PlayButton positioning - moved outside container** */}
-      <div className="absolute -top-4 -left-4 z-30">
-        <PlayButton
-          nodeId={id}
-          nodeType="filter"
-          onExecute={handleNodeExecution}
-          disabled={isProcessing}
-        />
-      </div>
-
-      {/* **FIXED: Delete button positioning - moved outside container** */}
-      <motion.button
-        onClick={handleDelete}
-        className={`absolute -top-2 -right-2 w-6 h-6 bg-red-400 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-500 shadow-lg z-30 ${
-          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        }`}
-        title="Delete node"
-        whileHover={{ scale: 1.1, rotate: 90 }}
-        whileTap={{ scale: 0.9 }}
-      >
-        ×
-      </motion.button>
-
-      {/* **FIXED: Input Handle - Made larger and more visible** */}
+    <div className="relative">
+      {/* Handles */}
       <Handle
         type="target"
         position={Position.Left}
         id="input"
-        style={{
-          background: 'linear-gradient(45deg, #6366f1, #3b82f6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(99, 102, 241, 0.4)',
-          left: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-blue-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-
-      <div className="p-4 pt-8 nowheel">
-        {/* **FIXED: Header - Simplified** */}
-        <div className="flex items-center space-x-2 mb-4">
-          <FloatingIcon isProcessing={isProcessing}>
-            <span className="text-xl">🔍</span>
-          </FloatingIcon>
-          <h3 className="text-sm font-semibold text-indigo-800">
-            Smart Filter
-          </h3>
-        </div>
-
-        {/* Root Files Toggle */}
-        <div className="mb-4">
-          <motion.label
-            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 text-emerald-700 border border-emerald-200 nodrag"
-            onMouseDown={handleInteractionEvent}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={includeRootFiles}
-              onChange={(e) => setIncludeRootFiles(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-emerald-600 rounded focus:ring-emerald-500 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>📁 Include Root Directory Files</span>
-          </motion.label>
-        </div>
-
-        {/* Unknown Formats Toggle */}
-        <div className="mb-4">
-          <motion.label
-            className="inline-flex items-center space-x-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-xs bg-gradient-to-r from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 text-rose-700 border border-rose-200 nodrag"
-            onMouseDown={handleInteractionEvent}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <motion.input
-              type="checkbox"
-              checked={showUnknownFormats}
-              onChange={(e) => setShowUnknownFormats(e.target.checked)}
-              onMouseDown={handleInteractionEvent}
-              className="w-3 h-3 text-rose-600 rounded focus:ring-rose-500 nodrag"
-              whileHover={{ scale: 1.1 }}
-            />
-            <span>❓ Show Unknown File Formats</span>
-          </motion.label>
-        </div>
-
-        {/* Step 1: Folder Selection */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-medium text-indigo-700">
-              📁 Step 1: Select Folders ({selectedFolders.size})
-            </div>
-            <div className="flex space-x-1">
-              <motion.button
-                onClick={selectAllFolders}
-                onMouseDown={handleInteractionEvent}
-                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 nodrag"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                All
-              </motion.button>
-              <motion.button
-                onClick={clearAllFolders}
-                onMouseDown={handleInteractionEvent}
-                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 nodrag"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                Clear
-              </motion.button>
-            </div>
-          </div>
-
-          <div className="mb-2">
-            <motion.input
-              type="text"
-              placeholder="🔍 Search folders..."
-              value={folderSearchTerm}
-              onChange={(e) => setFolderSearchTerm(e.target.value)}
-              onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 text-indigo-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            />
-          </div>
-
-          <div className="space-y-1 max-h-32 overflow-y-auto nowheel">
-            <div className="grid grid-cols-1 gap-1">
-              {filteredFolders.map((folder) => (
-                <motion.label
-                  key={`folder-${folder.path || 'root'}`}
-                  className={`inline-flex items-center space-x-2 px-2 py-1 rounded cursor-pointer transition-colors text-xs nodrag ${
-                    selectedFolders.has(folder.path)
-                      ? 'bg-blue-100 border border-blue-300 text-blue-800'
-                      : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
-                  }`}
-                  onMouseDown={handleInteractionEvent}
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
-                >
-                  <motion.input
-                    type="checkbox"
-                    checked={selectedFolders.has(folder.path)}
-                    onChange={() => toggleFolder(folder.path)}
-                    onMouseDown={handleInteractionEvent}
-                    className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500 nodrag"
-                    whileHover={{ scale: 1.1 }}
-                  />
-                  <span className="text-sm">📁</span>
-                  <span className="flex-1 text-xs truncate" title={folder.path || 'Root Directory'}>
-                    {folder.name}
-                  </span>
-                </motion.label>
-              ))}
-            </div>
-          </div>
-
-          {selectedFolders.size > 0 && (
-            <motion.div
-              className="text-xs text-blue-600 mt-1"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              ✓ {selectedFolders.size} folder{selectedFolders.size !== 1 ? 's' : ''} selected
-            </motion.div>
-          )}
-        </div>
-
-        {/* Step 2: Format Selection */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-medium text-indigo-700">
-              📄 Step 2: Select File Formats ({displayFormats.length} available)
-            </div>
-            <div className="flex space-x-1">
-              <motion.button
-                onClick={selectAllFormats}
-                onMouseDown={handleInteractionEvent}
-                className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 nodrag"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                All
-              </motion.button>
-              <motion.button
-                onClick={clearAllFormats}
-                onMouseDown={handleInteractionEvent}
-                className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 nodrag"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                Clear
-              </motion.button>
-            </div>
-          </div>
-
-          {/* Format Search */}
-          <div className="mb-2">
-            <motion.input
-              type="text"
-              placeholder="🔍 Search file formats..."
-              value={formatSearchTerm}
-              onChange={(e) => setFormatSearchTerm(e.target.value)}
-              onMouseDown={handleInteractionEvent}
-              className="w-full p-2 text-xs border border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-gradient-to-r from-indigo-50 to-blue-50 text-indigo-800 nodrag"
-              whileFocus={{ scale: 1.01 }}
-            />
-          </div>
-
-          {/* Format Display */}
-          {displayFormats.length > 0 ? (
-            <div className="space-y-2 max-h-40 overflow-y-auto nowheel">
-              {groupedFormats.size > 0 ? (
-                Array.from(groupedFormats.entries()).map(([category, formats]) => (
-                  <div key={`category-${category}`} className="space-y-1">
-                    <div className="text-xs font-medium text-indigo-600 flex items-center justify-between">
-                      <span>{category} ({formats.length}):</span>
-                      {category === 'Unknown' && (
-                        <span className="text-xs text-orange-600">❓ Auto-detected</span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      {formats.map((format) => (
-                        <motion.label
-                          key={`format-${category}-${format.ext}`}
-                          className={`inline-flex items-center space-x-1 px-2 py-1 rounded cursor-pointer transition-colors text-xs nodrag ${
-                            selectedFormats.has(format.ext)
-                              ? 'bg-green-100 border border-green-300 text-green-800'
-                              : format.isKnown
-                                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
-                                : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200'
-                          }`}
-                          onMouseDown={handleInteractionEvent}
-                          title={`${format.description} (${format.count} files)`}
-                          whileHover={{ scale: 1.01 }}
-                          whileTap={{ scale: 0.99 }}
-                        >
-                          <motion.input
-                            type="checkbox"
-                            checked={selectedFormats.has(format.ext)}
-                            onChange={() => toggleFormat(format.ext)}
-                            onMouseDown={handleInteractionEvent}
-                            className="w-3 h-3 text-green-600 rounded focus:ring-green-500 nodrag"
-                            whileHover={{ scale: 1.1 }}
-                          />
-                          <span className="text-xs">{format.icon}</span>
-                          <span className="whitespace-nowrap text-xs flex-1">{format.ext}</span>
-                          <span className="text-xs text-gray-400">({format.count})</span>
-                        </motion.label>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-xs text-gray-500 text-center py-2">
-                  No formats found matching search criteria
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded p-2">
-              <div className="font-medium mb-1">🔍 Format Detection Debug:</div>
-              <div>• Total files in repo: {inputData ? inputData.contents.filter(item => item.type === 'file').length : 0}</div>
-              <div>• Selected folders: {selectedFolders.size}</div>
-              <div>• Include root files: {includeRootFiles ? 'Yes' : 'No'}</div>
-              <div>• Available formats: {availableFormats.length}</div>
-              {selectedFolders.size === 0 && !includeRootFiles && (
-                <div className="text-red-600 mt-1">⚠️ Select folders or enable root files to see formats</div>
-              )}
-            </div>
-          )}
-
-          {selectedFormats.size > 0 && (
-            <motion.div
-              className="text-xs text-green-600 mt-1"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              ✓ {selectedFormats.size} format{selectedFormats.size !== 1 ? 's' : ''} selected
-            </motion.div>
-          )}
-        </div>
-
-        {/* Apply Filters Button */}
-        <motion.button
-          ref={applyButtonRef}
-          onClick={applyFilters}
-          onMouseDown={handleInteractionEvent}
-          disabled={isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles)}
-          className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-all duration-200 mb-3 nodrag ${
-            isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles)
-              ? 'bg-indigo-200 text-indigo-500 cursor-not-allowed'
-              : 'bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white shadow-lg'
-          }`}
-          whileHover={{
-            scale: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? 1 : 1.02,
-            boxShadow: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? undefined : "0 8px 20px rgba(99, 102, 241, 0.3)"
-          }}
-          whileTap={{ scale: isProcessing || !inputData || (selectedFolders.size === 0 && !includeRootFiles) ? 1 : 0.98 }}
-        >
-          <div className="flex items-center justify-center space-x-2">
-            {isProcessing ? (
-              <>
-                <motion.div
-                  className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                />
-                <span>Applying Magic...</span>
-              </>
-            ) : (
-              <>
-                <span>🔍</span>
-                <span>Apply Smart Filter</span>
-              </>
-            )}
-          </div>
-        </motion.button>
-
-        {/* Connection Status */}
-        <div className="mb-3">
-          <div
-            className={`text-xs px-3 py-2 rounded-full inline-block transition-all duration-300 ${
-              inputData
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
-            }`}
-          >
-            {inputData ? '🔗 Connected to GitNode' : '⏸️ Waiting for GitNode data'}
-          </div>
-        </div>
-
-        {/* Error Display */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2 mb-3"
-              initial={{ opacity: 0, y: -10, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 400, damping: 20 }}
-            >
-              ❌ {error}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Filter Results */}
-        <AnimatePresence>
-          {filteredData && (
-            <motion.div
-              className="text-xs bg-white border border-indigo-200 rounded-lg overflow-hidden shadow-lg nowheel"
-              initial={{ opacity: 0, scale: 0.8, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              onMouseDown={handleInteractionEvent}
-            >
-              <motion.div
-                className="bg-gradient-to-r from-indigo-50 to-blue-50 p-3 cursor-pointer hover:from-indigo-100 hover:to-blue-100 transition-all duration-300 nodrag"
-                onClick={() => setIsExpanded(!isExpanded)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="font-medium text-indigo-800">
-                    ✅ Filtered Results
-                  </div>
-                  <motion.span
-                    animate={{ rotate: isExpanded ? 180 : 0 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                    className="text-indigo-600"
-                  >
-                    ▼
-                  </motion.span>
-                </div>
-                <div className="text-indigo-700 text-xs mt-1">
-                  {filteredData.originalCount} → {filteredData.filteredCount} items
-                </div>
-              </motion.div>
-
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    className="max-h-48 overflow-y-auto bg-white p-2 nowheel"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
-                    onMouseDown={handleInteractionEvent}
-                  >
-                    {filteredData.contents.slice(0, 20).map((item) => (
-                      <motion.div
-                        key={`result-${item.path}`}
-                        className="flex items-center space-x-2 py-1 hover:bg-indigo-50 rounded transition-colors"
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        whileHover={{ scale: 1.01, x: 4 }}
-                      >
-                        <span className="text-sm">
-                          {item.type === 'folder' ? '📁' : (knownFormats.get(item.name.split('.').pop()?.toLowerCase())?.icon || '📄')}
-                        </span>
-                        <span className="text-xs text-indigo-700 flex-1 truncate">{item.name}</span>
-                      </motion.div>
-                    ))}
-                    {filteredData.contents.length > 20 && (
-                      <div className="text-xs text-indigo-500 text-center py-2">
-                        ...and {filteredData.contents.length - 20} more items
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* **FIXED: Output Handle - Made larger and more visible** */}
       <Handle
         type="source"
         position={Position.Right}
         id="output"
-        style={{
-          background: 'linear-gradient(45deg, #10b981, #3b82f6)',
-          width: '16px',
-          height: '16px',
-          border: '3px solid white',
-          borderRadius: '50%',
-          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
-          right: '-8px'
-        }}
-        isConnectable={isConnectable}
+        className="w-3 h-3 bg-green-400 border-2 border-white"
+        style={{ top: '20px' }}
       />
-    </motion.div>
+
+      <motion.div
+        className={`bg-white rounded-xl shadow-lg border-2 transition-all duration-300 overflow-hidden ${
+          selected ? 'border-indigo-400 shadow-indigo-100' : 'border-gray-200'
+        }`}
+        style={{ width: '320px', minHeight: '140px' }}
+        whileHover={{ scale: 1.02 }}
+        transition={{ type: "spring", stiffness: 400, damping: 10 }}
+      >
+        <BackgroundBeams className="rounded-xl" />
+
+        {/* Header */}
+        <div className="relative z-10 p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-indigo-400 to-blue-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">🗂️</span>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">Hierarchical Filter</h3>
+                <p className="text-xs text-gray-500">
+                  {selectedFolders.size} folders • {selectedFormats.size} formats
+                  {stats.filteredFiles > 0 && (
+                    <span className="text-green-600"> • {stats.filteredFiles} filtered</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+                title="Settings"
+              >
+                ⚙️
+              </button>
+              <button
+                onClick={processFiltering}
+                disabled={isProcessing}
+                className="w-6 h-6 flex items-center justify-center rounded bg-indigo-100 hover:bg-indigo-200 transition-colors disabled:opacity-50"
+                title="Apply Filter"
+              >
+                {isProcessing ? '🔄' : '▶️'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Input Data Status */}
+        <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+          <div className={`text-xs px-2 py-1 rounded-full text-center ${
+            connectedInputData && connectedInputData.files.length > 0
+              ? 'bg-blue-100 text-blue-800'
+              : 'bg-gray-100 text-gray-600'
+          }`}>
+            {connectedInputData && connectedInputData.files.length > 0
+              ? `📁 ${connectedInputData.files.length} files from ${connectedInputData.nodeType}`
+              : '📁 No input files detected'
+            }
+          </div>
+        </div>
+
+        {/* Hierarchical Folder Selection */}
+        {connectedInputData && connectedInputData.files.length > 0 && (
+          <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+            <div className="text-xs font-medium text-gray-700 mb-2">
+              📂 Folder Selection ({selectedFolders.size} selected)
+            </div>
+            <FolderTree
+              files={connectedInputData.files}
+              selectedFolders={selectedFolders}
+              onFolderToggle={handleFolderToggle}
+              expandedFolders={expandedFolders}
+              onFolderExpand={handleFolderExpand}
+            />
+          </div>
+        )}
+
+        {/* File Format Selection */}
+        {availableFormats.length > 0 && (
+          <div className="relative z-10 px-4 py-2 border-b border-gray-100">
+            <FileFormatSelector
+              availableFormats={availableFormats}
+              selectedFormats={selectedFormats}
+              onFormatToggle={handleFormatToggle}
+              onSelectAll={handleSelectAllFormats}
+              onSelectNone={handleSelectNoFormats}
+            />
+          </div>
+        )}
+
+        {/* Stats Display */}
+        {stats.filteredFiles > 0 && (
+          <div className="relative z-10 px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center">
+                <div className="font-semibold text-indigo-700">{stats.totalFiles}</div>
+                <div className="text-indigo-600">Total</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-indigo-700">{stats.filteredFiles}</div>
+                <div className="text-indigo-600">Filtered</div>
+              </div>
+              <div className="text-center">
+                <div className="font-semibold text-indigo-700">{stats.excludedFiles}</div>
+                <div className="text-indigo-600">Excluded</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="relative z-10 border-b border-gray-100 bg-gray-50/50"
+            >
+              <div className="p-4 space-y-4">
+                {/* Size Filters */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Max Size ({settings.maxFileSize} MB)
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value={settings.maxFileSize}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('maxFileSize', parseInt(e.target.value));
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      className="w-full nodrag"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Min Size ({settings.minFileSize} KB)
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1000"
+                      step="10"
+                      value={settings.minFileSize}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('minFileSize', parseInt(e.target.value));
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      className="w-full nodrag"
+                    />
+                  </div>
+                </div>
+
+                {/* Content Filter */}
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-700">Filter by Content</label>
+                  <input
+                    type="checkbox"
+                    checked={settings.filterByContent}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      handleSettingChange('filterByContent', e.target.checked);
+                    }}
+                    className="rounded"
+                  />
+                </div>
+
+                {settings.filterByContent && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Content Keywords (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.contentKeywords.join(', ')}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('contentKeywords', e.target.value.split(',').map(k => k.trim()));
+                      }}
+                      placeholder="function, class, import"
+                      className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                )}
+
+                {/* Advanced Options */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Use Hierarchical Selection</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.useHierarchicalSelection}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('useHierarchicalSelection', e.target.checked);
+                      }}
+                      className="rounded"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-gray-700">Case Sensitive</label>
+                    <input
+                      type="checkbox"
+                      checked={settings.caseSensitive}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSettingChange('caseSensitive', e.target.checked);
+                      }}
+                      className="rounded"
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Processing Indicator */}
+        {isProcessing && (
+          <div className="relative z-10 p-4">
+            <div className="flex items-center justify-center space-x-2 text-sm text-indigo-600">
+              <div className="animate-spin w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full"></div>
+              <span>Filtering files...</span>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 };
 
