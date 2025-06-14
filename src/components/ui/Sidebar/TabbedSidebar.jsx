@@ -384,10 +384,8 @@ const ProcessingTab = () => {
   );
 };
 
-const TabbedSidebar = () => {
+const TabbedSidebar = ({ onClose }) => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [isVisible, setIsVisible] = useState(true);
-  const sidebarRef = useRef(null);
 
   const tabs = [
     { id: 'overview', label: '📋 Overview', icon: '📋' },
@@ -396,186 +394,58 @@ const TabbedSidebar = () => {
     { id: 'processing', label: '⚙️ Processing', icon: '⚙️' }
   ];
 
-  const sidebarVariants = {
-    hidden: {
-      x: -320,
-      opacity: 0,
-      scale: 0.8,
-      filter: "blur(10px)"
-    },
-    visible: {
-      x: 0,
-      opacity: 1,
-      scale: 1,
-      filter: "blur(0px)",
-      transition: {
-        type: "spring",
-        damping: 25,
-        stiffness: 200,
-        staggerChildren: 0.1
-      }
-    },
-    exit: {
-      x: -320,
-      opacity: 0,
-      scale: 0.8,
-      filter: "blur(5px)",
-      transition: {
-        duration: 0.3
-      }
-    }
-  };
-
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'overview':
-        return <OverviewTab />;
-      case 'control':
-        return <ControlTab />;
-      case 'data':
-        return <DataSourcesTab />;
-      case 'processing':
-        return <ProcessingTab />;
-      default:
-        return <OverviewTab />;
+      case 'overview': return <OverviewTab />;
+      case 'control': return <ControlTab />;
+      case 'data': return <DataSourcesTab />;
+      case 'processing': return <ProcessingTab />;
+      default: return <OverviewTab />;
     }
   };
 
   return (
-    <>
-      <AnimatePresence>
-        {!isVisible && (
-          <motion.button
-            onClick={() => setIsVisible(true)}
-            className="absolute left-4 top-4 bg-blue-600 text-white rounded-full shadow-2xl hover:bg-blue-700 z-50 flex items-center justify-center"
-            style={{
-              width: '48px',
-              height: '48px'
-            }}
-            title="Show sidebar"
-            initial={{ scale: 0, rotate: -180 }}
-            animate={{ scale: 1, rotate: 0 }}
-            exit={{ scale: 0, rotate: 180 }}
-            whileHover={{
-              scale: 1.1,
-              boxShadow: "0 10px 25px rgba(59, 130, 246, 0.4)"
-            }}
-            whileTap={{ scale: 0.9 }}
-            transition={{
-              type: "spring",
-              damping: 15,
-              stiffness: 400
-            }}
+    <div className="h-full flex flex-col">
+      {/* Drag Handle */}
+      <div className="absolute top-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-gray-400/60 rounded-full hover:bg-gray-500/90 transition-colors cursor-grab" />
+
+      {/* Tab Headers */}
+      <div className="flex border-b border-white/20 bg-white/10 w-full pt-6">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 min-w-0 px-2 py-3 text-xs font-medium transition-all duration-200 relative
+              ${activeTab === tab.id ? 'text-blue-700 bg-white/40' : 'text-gray-700 bg-transparent'}`}
           >
-            ☰
-          </motion.button>
-        )}
-      </AnimatePresence>
+            <div className="flex flex-col items-center space-y-1">
+              <span className="text-sm">{tab.icon}</span>
+              <span className="truncate">{tab.label.split(' ')[1]}</span>
+            </div>
+            {activeTab === tab.id && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
+            )}
+          </button>
+        ))}
+      </div>
 
-      <AnimatePresence>
-        {isVisible && (
-          <motion.aside
-            ref={sidebarRef}
-            className="absolute inset-0 w-80 bg-white/95 backdrop-blur-sm border border-gray-300 shadow-2xl z-40 rounded-2xl overflow-hidden"
-            variants={sidebarVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
+      {/* Tab Content - flush left, no extra padding */}
+      <div className="flex-1 overflow-y-auto w-full px-4 py-4">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
           >
-            {/* Close Button */}
-            <motion.button
-              onClick={() => setIsVisible(false)}
-              className="absolute top-3 right-3 w-8 h-8 bg-gray-200 hover:bg-gray-300 rounded-full flex items-center justify-center text-gray-600 hover:text-gray-800 z-50"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              ×
-            </motion.button>
-
-            {/* Drag Handle */}
-            <motion.div
-              className="absolute top-2 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-gray-400 rounded-full hover:bg-gray-500 transition-colors cursor-grab"
-              whileHover={{ scale: 1.2, backgroundColor: "#6b7280" }}
-              whileTap={{ scale: 0.9 }}
-            />
-
-            {/* **ENHANCED: Multi-Tab Headers** */}
-            <motion.div
-              className="flex border-b border-gray-200 bg-gray-50/50 rounded-t-2xl mx-2 mt-6 overflow-x-auto"
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              {tabs.map((tab) => (
-                <motion.button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className="flex-1 min-w-0 px-2 py-3 text-xs font-medium transition-all duration-200 relative"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  style={{
-                    color: activeTab === tab.id ? '#2563eb' : '#6b7280',
-                    backgroundColor: activeTab === tab.id ? 'rgba(255, 255, 255, 1)' : 'rgba(255, 255, 255, 0)'
-                  }}
-                >
-                  <div className="flex flex-col items-center space-y-1">
-                    <span className="text-sm">{tab.icon}</span>
-                    <span className="truncate">{tab.label.split(' ')[1]}</span>
-                  </div>
-                  {activeTab === tab.id && (
-                    <motion.div
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
-                      layoutId="activeTab"
-                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                  )}
-                </motion.button>
-              ))}
-            </motion.div>
-
-            {/* **ENHANCED: Tab Content with proper categorization** */}
-            <motion.div
-              className="flex flex-col h-full pt-0 pb-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              style={{
-                height: 'calc(100% - 80px)', // Account for larger header
-                overflow: 'hidden'
-              }}
-            >
-              <div className="flex-1 overflow-y-auto">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeTab}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    {renderTabContent()}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-              {/* Bottom padding spacer */}
-              <div className="h-4 flex-shrink-0" />
-            </motion.div>
-
-            {/* Glow effect */}
-            <motion.div
-              className="absolute inset-0 rounded-2xl pointer-events-none"
-              animate={{
-                boxShadow: isVisible
-                  ? "0 0 30px rgba(59, 130, 246, 0.1)"
-                  : "0 0 0px rgba(59, 130, 246, 0)"
-              }}
-              transition={{ duration: 0.5 }}
-            />
-          </motion.aside>
-        )}
-      </AnimatePresence>
-    </>
+            {renderTabContent()}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
   );
 };
 
 export default TabbedSidebar;
+

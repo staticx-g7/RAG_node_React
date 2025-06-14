@@ -420,13 +420,14 @@ const FlowboardContent = () => {
           },
         }}
       >
-        <Background
-          variant="dots"
-          gap={20}
-          size={1.5}
-          color="#e5e7eb"
-          style={{ opacity: 0.5 }}
-        />
+      <Background
+  variant="dots"
+  gap={20}
+  size={3}
+  color="#94a3b8"
+  style={{ opacity: 0.8 }}
+/>
+
         <Controls
           showZoom={true}
           showFitView={true}
@@ -468,7 +469,7 @@ const FlowboardContent = () => {
       </ReactFlow>
 
       {/* Floating UI Components */}
-      <ConsoleWindow />
+
       <ChatWindow />
 
       {/* Enhanced Stats Panel */}

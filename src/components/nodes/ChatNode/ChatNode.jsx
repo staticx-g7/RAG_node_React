@@ -11,7 +11,7 @@ const BackgroundBeams = ({ className }) => (
 );
 
 const ChatNode = ({ id, data, selected }) => {
-  const { updateNodeData, getNodes, getEdges } = useReactFlow();
+  const { setNodes, getNodes, getEdges } = useReactFlow();
 
   // State management
   const [showSettings, setShowSettings] = useState(false);
@@ -22,18 +22,26 @@ const ChatNode = ({ id, data, selected }) => {
   const [availableModels, setAvailableModels] = useState([]);
   const [isChatWindowOpen, setIsChatWindowOpen] = useState(false);
 
-  // Chat settings
-  const [settings, setSettings] = useState({
+  // FIXED: Initialize settings from data and prevent resets
+  const [settings, setSettings] = useState(() => ({
     model: data.model || '',
     creativity: data.creativity || 0.7,
-    maxResponseLength: data.maxResponseLength || 2000, // Increased for better responses
+    maxResponseLength: data.maxResponseLength || 2000,
     useKnowledgeBase: data.useKnowledgeBase !== false,
     knowledgeBaseContent: data.knowledgeBaseContent || '',
     systemPrompt: data.systemPrompt || 'You are a helpful AI assistant with access to repository information. Use the provided context to answer questions accurately.',
     contextWindow: data.contextWindow || 10,
     streamResponse: data.streamResponse !== false,
     autoOpenChat: data.autoOpenChat !== false,
-  });
+    // NEW: Additional parameters for better control
+    temperature: data.temperature || data.creativity || 0.7,
+    maxTokens: data.maxTokens || data.maxResponseLength || 2000,
+    topP: data.topP || 1.0,
+    frequencyPenalty: data.frequencyPenalty || 0,
+    presencePenalty: data.presencePenalty || 0,
+    responseStyle: data.responseStyle || 'detailed',
+    contextWindowTokens: data.contextWindowTokens || 4096,
+  }));
 
   const [stats, setStats] = useState({
     totalMessages: messages.length,
@@ -43,24 +51,87 @@ const ChatNode = ({ id, data, selected }) => {
     knowledgeBaseSize: 0,
   });
 
-  // ENHANCED: Strict API config detection
+  // NEW: Response style presets
+  const responseStyles = {
+    brief: {
+      maxTokens: 150,
+      maxResponseLength: 150,
+      systemPrompt: 'Provide brief, concise responses. Keep answers short and to the point.',
+      temperature: 0.3,
+      creativity: 0.3
+    },
+    moderate: {
+      maxTokens: 500,
+      maxResponseLength: 500,
+      systemPrompt: 'Provide balanced responses with good detail. Aim for 1-2 paragraphs.',
+      temperature: 0.7,
+      creativity: 0.7
+    },
+    detailed: {
+      maxTokens: 1500,
+      maxResponseLength: 1500,
+      systemPrompt: 'Provide comprehensive, detailed responses. Include examples, explanations, and thorough analysis. Aim for 3-4 paragraphs with rich context.',
+      temperature: 0.8,
+      creativity: 0.8
+    },
+    creative: {
+      maxTokens: 2000,
+      maxResponseLength: 2000,
+      systemPrompt: 'Provide creative, engaging responses with storytelling elements. Be imaginative and expressive.',
+      temperature: 0.9,
+      creativity: 0.9
+    }
+  };
+
+  // NEW: Apply response style preset
+  const applyResponseStyle = useCallback((style) => {
+    const preset = responseStyles[style];
+    if (preset) {
+      setSettings(prev => ({
+        ...prev,
+        responseStyle: style,
+        ...preset
+      }));
+    }
+  }, []);
+
+  // FIXED: Debounced update to prevent constant re-renders
+  const updateNodeDataDebounced = useRef(null);
+
+  const updateNodeData = useCallback((updates) => {
+    if (updateNodeDataDebounced.current) {
+      clearTimeout(updateNodeDataDebounced.current);
+    }
+
+    updateNodeDataDebounced.current = setTimeout(() => {
+      setNodes((nodes) =>
+        nodes.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  ...updates
+                }
+              }
+            : node
+        )
+      );
+    }, 300); // 300ms debounce
+  }, [id, setNodes]);
+
+  // Preserve existing API config detection
   const getApiConfig = useCallback(() => {
     try {
       const edges = getEdges();
       const nodes = getNodes();
 
-      console.log('🔍 ChatNode searching for API config...');
-      console.log('📊 Current node ID:', id);
-      console.log('📊 Edges targeting this node:', edges.filter(e => e.target === id));
-
-      // Only look for direct connections to this specific node
       const apiConfigEdge = edges.find(edge => {
         const sourceNode = nodes.find(n => n.id === edge.source);
         return edge.target === id && sourceNode && sourceNode.type === 'apiConfigNode';
       });
 
       if (apiConfigEdge) {
-        console.log('✅ Found API config edge:', apiConfigEdge);
         const apiConfigNode = nodes.find(node => node.id === apiConfigEdge.source);
 
         if (apiConfigNode && apiConfigNode.type === 'apiConfigNode' && apiConfigNode.data) {
@@ -75,13 +146,11 @@ const ChatNode = ({ id, data, selected }) => {
             chatModels: apiConfigNode.data.chatModels || [],
           };
 
-          console.log('✅ Extracted config for Chat:', config);
           setConnectedApiConfig(config);
           return config;
         }
       }
 
-      console.log('❌ No API config found for ChatNode (strict mode)');
       setConnectedApiConfig(null);
       return {};
     } catch (error) {
@@ -91,13 +160,11 @@ const ChatNode = ({ id, data, selected }) => {
     }
   }, [id, getNodes, getEdges]);
 
-  // ENHANCED: Get vector data with comprehensive metadata extraction
+  // Preserve existing vector data detection
   const getVectorData = useCallback(() => {
     try {
       const edges = getEdges();
       const nodes = getNodes();
-
-      console.log('🔍 ChatNode looking for vector data...');
 
       const vectorEdge = edges.find(edge => {
         const sourceNode = nodes.find(n => n.id === edge.source);
@@ -108,14 +175,11 @@ const ChatNode = ({ id, data, selected }) => {
         const vectorNode = nodes.find(node => node.id === vectorEdge.source);
 
         if (vectorNode && vectorNode.data) {
-          console.log('✅ Found vector node:', vectorNode.data);
-
           const vectorData = {
             vectors: vectorNode.data.vectorizationResults?.vectors || [],
             metadata: vectorNode.data.vectorizationResults?.metadata || {},
             stats: vectorNode.data.stats || {},
             nodeType: vectorNode.type,
-            // ENHANCED: Extract comprehensive repository context
             repositoryInfo: {
               totalVectors: vectorNode.data.stats?.totalVectors || 0,
               embeddingModel: vectorNode.data.vectorizationResults?.metadata?.model || 'unknown',
@@ -124,7 +188,6 @@ const ChatNode = ({ id, data, selected }) => {
             }
           };
 
-          // ENHANCED: Process and structure knowledge base content
           if (vectorData.vectors.length > 0) {
             const structuredKnowledge = vectorData.vectors.map((vector, index) => {
               const metadata = vector.metadata || {};
@@ -139,22 +202,17 @@ const ChatNode = ({ id, data, selected }) => {
               };
             }).filter(item => item.content.trim().length > 0);
 
-            // Create comprehensive knowledge base content
             const knowledgeContent = structuredKnowledge
               .map((item, index) => {
                 return `[${item.filename} - Chunk ${item.chunkIndex + 1}]\n${item.content}`;
               })
               .join('\n\n---\n\n');
 
-            console.log('📚 Processed knowledge base:', {
-              totalChunks: structuredKnowledge.length,
-              contentLength: knowledgeContent.length,
-              sampleFiles: structuredKnowledge.slice(0, 3).map(s => s.filename)
-            });
-
-            // Update settings with processed knowledge
             if (settings.useKnowledgeBase && knowledgeContent) {
-              handleSettingChange('knowledgeBaseContent', knowledgeContent);
+              setSettings(prev => ({
+                ...prev,
+                knowledgeBaseContent: knowledgeContent
+              }));
               setStats(prev => ({
                 ...prev,
                 knowledgeBaseSize: knowledgeContent.length
@@ -170,7 +228,6 @@ const ChatNode = ({ id, data, selected }) => {
         }
       }
 
-      console.log('❌ No vector data found');
       setConnectedVectorData(null);
       return { vectors: [], metadata: {}, stats: {}, nodeType: null };
     } catch (error) {
@@ -179,6 +236,27 @@ const ChatNode = ({ id, data, selected }) => {
       return { vectors: [], metadata: {}, stats: {}, nodeType: null };
     }
   }, [id, getNodes, getEdges, settings.useKnowledgeBase]);
+
+
+  // NEW: Listen for chat window reset events
+  useEffect(() => {
+    const handleClearMessages = (event) => {
+      if (event.detail.nodeId === id) {
+        console.log('🔄 Clearing ChatNode messages for node:', id);
+        setMessages([]);
+        setStats(prev => ({
+          ...prev,
+          totalMessages: 0,
+          tokensUsed: 0,
+          lastMessageTime: null
+        }));
+      }
+    };
+
+    window.addEventListener('clearChatNodeMessages', handleClearMessages);
+    return () => window.removeEventListener('clearChatNodeMessages', handleClearMessages);
+  }, [id]);
+
 
   // Monitor for API config and vector data changes
   useEffect(() => {
@@ -190,16 +268,15 @@ const ChatNode = ({ id, data, selected }) => {
     return () => clearInterval(interval);
   }, [getApiConfig, getVectorData]);
 
-  // Extract available models with proper type checking
+  // Extract available models
   useEffect(() => {
     if (connectedApiConfig && connectedApiConfig.chatModels && connectedApiConfig.chatModels.length > 0) {
       setAvailableModels(connectedApiConfig.chatModels);
 
       if (!settings.model && connectedApiConfig.chatModels.length > 0) {
-        handleSettingChange('model', connectedApiConfig.chatModels[0]);
+        setSettings(prev => ({ ...prev, model: connectedApiConfig.chatModels[0] }));
       }
     } else if (connectedApiConfig && connectedApiConfig.availableModels && connectedApiConfig.availableModels.length > 0) {
-      // Filter out embedding models with proper type checking
       const chatModels = connectedApiConfig.availableModels.filter(model => {
         try {
           if (typeof model !== 'string') {
@@ -208,7 +285,6 @@ const ChatNode = ({ id, data, selected }) => {
                    !modelName.toLowerCase().includes('embedding') &&
                    !modelName.toLowerCase().includes('embed');
           }
-
           return !model.toLowerCase().includes('embedding') &&
                  !model.toLowerCase().includes('embed');
         } catch (error) {
@@ -230,34 +306,46 @@ const ChatNode = ({ id, data, selected }) => {
       setAvailableModels(chatModels);
 
       if (!settings.model && chatModels.length > 0) {
-        handleSettingChange('model', chatModels[0]);
+        setSettings(prev => ({ ...prev, model: chatModels[0] }));
       }
     } else {
       setAvailableModels([]);
     }
   }, [connectedApiConfig, settings.model]);
 
-  // Update node data when settings change
+  // FIXED: Only update node data when necessary, not on every settings change
   useEffect(() => {
-    updateNodeData(id, {
+    updateNodeData({
       ...settings,
       stats,
-      connectedApiConfig,
-      connectedVectorData,
       messages,
       availableModels,
       isChatWindowOpen,
       lastUpdated: Date.now()
     });
-  }, [settings, stats, connectedApiConfig, connectedVectorData, messages, availableModels, isChatWindowOpen, id, updateNodeData]);
+  }, [messages, availableModels, isChatWindowOpen, updateNodeData]);
 
-  // Handle setting changes
-  const handleSettingChange = (key, value) => {
-    const newSettings = { ...settings, [key]: value };
-    setSettings(newSettings);
-  };
+  // FIXED: Handle setting changes without triggering resets
+  const handleSettingChange = useCallback((key, value) => {
+    setSettings(prev => {
+      const newSettings = { ...prev, [key]: value };
 
-  // ENHANCED: Send message with proper endpoint construction
+      // Sync between old and new parameter names
+      if (key === 'creativity') {
+        newSettings.temperature = value;
+      } else if (key === 'temperature') {
+        newSettings.creativity = value;
+      } else if (key === 'maxResponseLength') {
+        newSettings.maxTokens = value;
+      } else if (key === 'maxTokens') {
+        newSettings.maxResponseLength = value;
+      }
+
+      return newSettings;
+    });
+  }, []);
+
+  // Preserve existing sendMessage function
   const sendMessage = useCallback(async (messageText) => {
     if (!messageText.trim() || !connectedApiConfig) return;
 
@@ -273,7 +361,6 @@ const ChatNode = ({ id, data, selected }) => {
     const startTime = Date.now();
 
     try {
-      // Construct proper chat completions endpoint
       let chatEndpoint;
       if (connectedApiConfig.provider === 'blablador' || connectedApiConfig.endpoint?.includes('blablador')) {
         chatEndpoint = `${connectedApiConfig.endpoint}/chat/completions`;
@@ -283,9 +370,6 @@ const ChatNode = ({ id, data, selected }) => {
         chatEndpoint = `${connectedApiConfig.endpoint}/chat/completions`;
       }
 
-      console.log('🔍 Using chat endpoint:', chatEndpoint);
-
-      // Prepare messages for API
       const apiMessages = [];
 
       if (settings.systemPrompt) {
@@ -295,22 +379,19 @@ const ChatNode = ({ id, data, selected }) => {
         });
       }
 
-      // ENHANCED: Better knowledge base integration
       if (settings.useKnowledgeBase && connectedVectorData?.processedContent) {
         apiMessages.push({
           role: 'system',
-          content: `You have access to the hellogitworld repository. Here is the repository content:
+          content: `You have access to the repository. Here is the repository content:
 
 ${connectedVectorData.processedContent}
 
 Instructions:
-- Use the above repository information to answer questions about the hellogitworld repository
+- Use the above repository information to answer questions about the repository
 - Reference specific files and code when relevant
 - Be specific about what the repository contains and does
 - Don't say you don't have access - you have the repository content above`
         });
-
-        console.log('📚 Added repository context:', connectedVectorData.processedContent.length, 'characters');
       }
 
       const recentMessages = messages.slice(-settings.contextWindow);
@@ -335,8 +416,11 @@ Instructions:
         body: JSON.stringify({
           model: settings.model,
           messages: apiMessages,
-          temperature: settings.creativity,
-          max_tokens: settings.maxResponseLength,
+          temperature: settings.temperature || settings.creativity,
+          max_tokens: settings.maxTokens || settings.maxResponseLength,
+          top_p: settings.topP,
+          frequency_penalty: settings.frequencyPenalty,
+          presence_penalty: settings.presencePenalty,
           stream: false
         })
       });
@@ -382,17 +466,8 @@ Instructions:
     }
   }, [connectedApiConfig, settings, messages]);
 
-  // ENHANCED: Open chat window with comprehensive data
+  // Preserve existing functions
   const openChatWindow = useCallback(() => {
-    console.log('🔥 Opening chat window...', {
-      nodeId: id,
-      hasApiConfig: !!connectedApiConfig,
-      hasModel: !!settings.model,
-      isConnected: connectedApiConfig?.isConnected,
-      vectorsCount: connectedVectorData?.vectors?.length || 0
-    });
-
-    // Create comprehensive chat data object
     const chatData = {
       nodeId: id,
       apiConfig: connectedApiConfig,
@@ -401,7 +476,6 @@ Instructions:
       sendMessage: sendMessage,
       isLoading: isLoading,
       availableModels: availableModels,
-      // ENHANCED: Pass comprehensive vector data
       vectorData: connectedVectorData ? {
         vectors: connectedVectorData.vectors,
         metadata: connectedVectorData.metadata,
@@ -412,13 +486,6 @@ Instructions:
       } : null
     };
 
-    console.log('🚀 Dispatching openChatWindow event with enhanced data:', {
-      vectorsCount: chatData.vectorData?.vectors?.length || 0,
-      knowledgeSize: chatData.vectorData?.processedContent?.length || 0,
-      hasKnowledge: !!chatData.vectorData?.processedContent
-    });
-
-    // Dispatch custom event to open chat window
     const chatEvent = new CustomEvent('openChatWindow', {
       detail: chatData
     });
@@ -427,7 +494,6 @@ Instructions:
     setIsChatWindowOpen(true);
   }, [id, connectedApiConfig, settings, messages, sendMessage, isLoading, availableModels, connectedVectorData]);
 
-  // Clear conversation
   const clearConversation = useCallback(() => {
     setMessages([]);
     setStats(prev => ({
@@ -437,7 +503,6 @@ Instructions:
     }));
   }, []);
 
-  // Debug connections
   const debugConnections = useCallback(() => {
     const edges = getEdges();
     const nodes = getNodes();
@@ -461,7 +526,6 @@ Use Knowledge Base: ${settings.useKnowledgeBase}
 Check console for detailed logs`);
   }, [getEdges, getNodes, id, connectedApiConfig, connectedVectorData, availableModels, settings]);
 
-  // Get connection status for display
   const getConnectionStatus = () => {
     if (connectedApiConfig && connectedApiConfig.isConnected && settings.model) {
       return { status: 'ready', message: 'Ready to Chat', color: 'green' };
@@ -478,7 +542,7 @@ Check console for detailed logs`);
 
   return (
     <div className="relative">
-      {/* Handles */}
+      {/* Preserve existing handles */}
       <Handle
         type="target"
         position={Position.Left}
@@ -569,7 +633,7 @@ Check console for detailed logs`);
           </div>
         </div>
 
-        {/* ENHANCED: Clean Status Display with Repository Info */}
+        {/* Status Display */}
         <div className="relative z-10 px-4 py-3 border-b border-gray-100">
           <div
             className={`text-sm px-3 py-2 rounded-lg text-center font-medium transition-all cursor-pointer ${
@@ -610,7 +674,7 @@ Check console for detailed logs`);
           </div>
         </div>
 
-        {/* Enhanced Message Stats */}
+        {/* Message Stats */}
         {(messages.length > 0 || (connectedVectorData && connectedVectorData.vectors.length > 0)) && (
           <div className="relative z-10 px-4 py-2 bg-emerald-50 border-b border-emerald-100">
             <div className="grid grid-cols-3 gap-2 text-xs">
@@ -630,7 +694,7 @@ Check console for detailed logs`);
           </div>
         )}
 
-        {/* Settings Panel */}
+        {/* ENHANCED: Settings Panel with new controls */}
         <AnimatePresence>
           {showSettings && (
             <motion.div
@@ -640,6 +704,23 @@ Check console for detailed logs`);
               className="relative z-10 border-b border-gray-100 bg-gray-50/50"
             >
               <div className="p-4 space-y-4">
+                {/* NEW: Response Style Selector */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Response Style
+                  </label>
+                  <select
+                    value={settings.responseStyle}
+                    onChange={(e) => applyResponseStyle(e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  >
+                    <option value="brief">Brief (150 tokens)</option>
+                    <option value="moderate">Moderate (500 tokens)</option>
+                    <option value="detailed">Detailed (1500 tokens)</option>
+                    <option value="creative">Creative (2000 tokens)</option>
+                  </select>
+                </div>
+
                 {/* Model Selection */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -661,39 +742,100 @@ Check console for detailed logs`);
                   </select>
                 </div>
 
-                {/* Creativity Slider */}
+                {/* ENHANCED: Creativity Slider */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Creativity ({settings.creativity})
+                    Creativity: {settings.creativity || settings.temperature}
                   </label>
                   <input
                     type="range"
                     min="0"
                     max="2"
                     step="0.1"
-                    value={settings.creativity}
+                    value={settings.creativity || settings.temperature}
                     onChange={(e) => handleSettingChange('creativity', parseFloat(e.target.value))}
                     onMouseDown={(e) => e.stopPropagation()}
                     className="w-full nodrag"
                   />
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Focused</span>
+                    <span>Balanced</span>
+                    <span>Creative</span>
+                  </div>
                 </div>
 
-                {/* Max Response Length */}
+                {/* ENHANCED: Max Response Length */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Max Response Length ({settings.maxResponseLength} tokens)
+                    Max Response Length: {settings.maxResponseLength || settings.maxTokens} tokens
                   </label>
                   <input
                     type="range"
-                    min="500"
+                    min="50"
                     max="4000"
-                    step="100"
-                    value={settings.maxResponseLength}
+                    step="50"
+                    value={settings.maxResponseLength || settings.maxTokens}
                     onChange={(e) => handleSettingChange('maxResponseLength', parseInt(e.target.value))}
                     onMouseDown={(e) => e.stopPropagation()}
                     className="w-full nodrag"
                   />
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>50</span>
+                    <span>2000</span>
+                    <span>4000</span>
+                  </div>
                 </div>
+
+                {/* NEW: Context Window Info */}
+                <div className="bg-blue-50 p-3 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-blue-600">ℹ️</span>
+                    <div>
+                      <p className="text-sm font-medium text-blue-800">Context Window</p>
+                      <p className="text-xs text-blue-600">
+                        Current: {settings.contextWindowTokens || 4096} tokens •
+                        Available: {(settings.contextWindowTokens || 4096) - (settings.maxTokens || settings.maxResponseLength)} for input
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* NEW: Advanced Parameters */}
+                <details className="border border-gray-200 rounded-lg p-3">
+                  <summary className="cursor-pointer font-medium text-gray-700">
+                    Advanced Parameters
+                  </summary>
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Top P: {settings.topP}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={settings.topP}
+                        onChange={(e) => handleSettingChange('topP', parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Frequency Penalty: {settings.frequencyPenalty}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={settings.frequencyPenalty}
+                        onChange={(e) => handleSettingChange('frequencyPenalty', parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </details>
 
                 {/* Use Knowledge Base Toggle */}
                 <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
@@ -743,7 +885,7 @@ Check console for detailed logs`);
                   />
                 </div>
 
-                {/* Enhanced Repository Info */}
+                {/* Repository Info */}
                 {connectedVectorData && connectedVectorData.vectors.length > 0 && (
                   <div className="bg-blue-100 p-3 rounded-lg text-xs">
                     <div className="font-medium text-blue-800 mb-2">Repository Knowledge Base:</div>
@@ -759,7 +901,7 @@ Check console for detailed logs`);
                   </div>
                 )}
 
-                {/* Connection Debug Info */}
+                {/* Connection Info */}
                 {connectedApiConfig && (
                   <div className="bg-gray-100 p-2 rounded text-xs">
                     <div className="font-medium text-gray-700 mb-1">Connection Info:</div>
