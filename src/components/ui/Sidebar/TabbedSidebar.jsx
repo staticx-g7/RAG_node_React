@@ -317,6 +317,13 @@ const ProcessingTab = () => {
       icon: '💬',
       color: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 text-green-800',
       description: 'Query your knowledge base with intelligent conversation'
+    },
+    {
+      type: 'readmeNode',
+      label: 'README Generator',
+      icon: '📝',
+      color: 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200 text-amber-800',
+      description: 'Generate comprehensive README files using AI'
     }
   ];
 

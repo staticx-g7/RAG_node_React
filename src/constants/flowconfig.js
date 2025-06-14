@@ -9,6 +9,7 @@ import ChunkNode from '../components/nodes/ChunkNode';
 import APIConfigNode from '../components/nodes/APIConfigNode';
 import VectorizeNode from '../components/nodes/VectorizeNode';
 import ChatNode from '../components/nodes/ChatNode';
+import ReadmeNode from '../components/nodes/ReadmeNode';
 
 // Node type definitions with enhanced compatibility
 export const nodeTypes = {
@@ -21,7 +22,9 @@ export const nodeTypes = {
   apiConfigNode: APIConfigNode,
   vectorizeNode: VectorizeNode,
   chatNode: ChatNode,
+  readmeNode: ReadmeNode,
 };
+
 
 // Universal data format standards for cross-node compatibility
 export const NODE_DATA_FORMATS = {
@@ -399,7 +402,13 @@ export const NODE_CATEGORIES = {
         label: 'RAG Chat Query',
         icon: '💬',
         description: 'Query your knowledge base with intelligent conversation'
-      }
+      },
+      {
+        type: 'readmeNode',
+        label: 'README Generator',
+        icon: '📝',
+        description: 'Generate comprehensive README files using AI'
+      },
     ]
   }
 };
