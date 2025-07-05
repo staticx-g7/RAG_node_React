@@ -17,6 +17,13 @@ import { INITIAL_NODES, INITIAL_EDGES, FLOW_CONFIG, nodeTypes } from '../../cons
 import { useDnD } from '../../contexts/DnDContext';
 import ConsoleWindow from '../ui/Console';
 import ChatWindow from '../ui/ChatWindow';
+import {
+  exportFlow,
+  downloadFlowAsJSON,
+  importFlowFromJSON,
+  saveToLocalStorage,
+  loadFromLocalStorage
+} from '../../utils/flowExport';
 import '@xyflow/react/dist/style.css';
 
 // Enhanced Custom Edge Component with Delete Button
@@ -147,6 +154,7 @@ const FlowboardContent = () => {
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
   const [type] = useDnD();
   const [selectedElements, setSelectedElements] = useState({ nodes: [], edges: [] });
+  const [lastSaved, setLastSaved] = useState(null);
 
   const { onConnect, onConnectEnd } = useNodeOperations(setNodes, setEdges);
 
@@ -197,6 +205,7 @@ const FlowboardContent = () => {
           chunkNode: { label: 'Universal Chunker', icon: '🧩', description: 'Chunk content for RAG' },
           vectorizeNode: { label: 'Vector Embeddings', icon: '🔮', description: 'Generate embeddings' },
           chatNode: { label: 'AI Chat', icon: '💬', description: 'Chat with AI models' },
+          readmeNode: { label: 'README Generator', icon: '📝', description: 'Generate README files' },
         };
         return configs[nodeType] || { label: `${nodeType} Node`, icon: '⚡', description: 'Custom node' };
       };
@@ -253,6 +262,72 @@ const FlowboardContent = () => {
     });
   }, []);
 
+  // Export/Import functions for Header events
+  const handleExportFromHeader = useCallback(() => {
+    const flowData = exportFlow(reactFlowInstance, nodes, edges);
+    if (flowData) {
+      downloadFlowAsJSON(flowData, 'rag-workflow');
+      console.log('✅ Workflow exported from header');
+    }
+  }, [reactFlowInstance, nodes, edges]);
+
+  const handleImportFromHeader = useCallback(async (event) => {
+    const { file } = event.detail;
+    if (!file) return;
+
+    try {
+      const flowData = await importFlowFromJSON(file);
+
+      const { x = 0, y = 0, zoom = 1 } = flowData.viewport || {};
+
+      setNodes(flowData.nodes || []);
+      setEdges(flowData.edges || []);
+
+      setTimeout(() => {
+        if (reactFlowInstance) {
+          reactFlowInstance.setViewport({ x, y, zoom });
+        }
+      }, 100);
+
+      console.log('✅ Workflow imported from header');
+      alert(`Workflow imported successfully!\nNodes: ${flowData.nodes?.length || 0}\nEdges: ${flowData.edges?.length || 0}`);
+
+    } catch (error) {
+      console.error('❌ Import failed:', error);
+      alert('Failed to import workflow: ' + error.message);
+    }
+  }, [setNodes, setEdges, reactFlowInstance]);
+
+  const handleQuickSaveFromHeader = useCallback(() => {
+    const flowData = exportFlow(reactFlowInstance, nodes, edges);
+    if (flowData) {
+      const success = saveToLocalStorage(flowData);
+      if (success) {
+        setLastSaved(Date.now());
+        console.log('💾 Quick saved from header');
+      }
+    }
+  }, [reactFlowInstance, nodes, edges]);
+
+  const handleClearFromHeader = useCallback(() => {
+    setNodes([]);
+    setEdges([]);
+    localStorage.removeItem('rag-workflow-autosave');
+    console.log('🗑️ Workflow cleared from header');
+  }, [setNodes, setEdges]);
+
+  // Auto-save functionality
+  const autoSave = useCallback(() => {
+    const flowData = exportFlow(reactFlowInstance, nodes, edges);
+    if (flowData) {
+      const success = saveToLocalStorage(flowData);
+      if (success) {
+        setLastSaved(Date.now());
+        console.log('💾 Auto-saved workflow');
+      }
+    }
+  }, [reactFlowInstance, nodes, edges]);
+
   // Delete handlers
   useEffect(() => {
     const handleDeleteNode = (event) => {
@@ -278,6 +353,21 @@ const FlowboardContent = () => {
       window.removeEventListener('deleteEdge', handleDeleteEdge);
     };
   }, [setNodes, setEdges]);
+
+  // Listen for Header events
+  useEffect(() => {
+    window.addEventListener('exportFlow', handleExportFromHeader);
+    window.addEventListener('importFlow', handleImportFromHeader);
+    window.addEventListener('quickSave', handleQuickSaveFromHeader);
+    window.addEventListener('clearWorkflow', handleClearFromHeader);
+
+    return () => {
+      window.removeEventListener('exportFlow', handleExportFromHeader);
+      window.removeEventListener('importFlow', handleImportFromHeader);
+      window.removeEventListener('quickSave', handleQuickSaveFromHeader);
+      window.removeEventListener('clearWorkflow', handleClearFromHeader);
+    };
+  }, [handleExportFromHeader, handleImportFromHeader, handleQuickSaveFromHeader, handleClearFromHeader]);
 
   // Enhanced keyboard shortcuts
   useEffect(() => {
@@ -315,11 +405,23 @@ const FlowboardContent = () => {
         setNodes((nds) => nds.map(node => ({ ...node, selected: false })));
         setEdges((eds) => eds.map(edge => ({ ...edge, selected: false })));
       }
+
+      // Quick save with Cmd+S
+      if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+        event.preventDefault();
+        handleQuickSaveFromHeader();
+      }
+
+      // Quick export with Cmd+E
+      if ((event.metaKey || event.ctrlKey) && event.key === 'e') {
+        event.preventDefault();
+        handleExportFromHeader();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElements, reactFlowInstance, setNodes, setEdges]);
+  }, [selectedElements, reactFlowInstance, setNodes, setEdges, handleQuickSaveFromHeader, handleExportFromHeader]);
 
   // Node execution handler
   const handleNodeExecution = useCallback((nodeId) => {
@@ -366,20 +468,34 @@ const FlowboardContent = () => {
     };
   }, [handleNodeExecution]);
 
-  // Auto-save functionality
+  // Auto-save every 30 seconds
   useEffect(() => {
-    const autoSave = () => {
-      const flowData = {
-        nodes,
-        edges,
-        timestamp: Date.now()
-      };
-      localStorage.setItem('flowboard-autosave', JSON.stringify(flowData));
-    };
-
-    const interval = setInterval(autoSave, 30000); // Auto-save every 30 seconds
+    const interval = setInterval(autoSave, 30000);
     return () => clearInterval(interval);
-  }, [nodes, edges]);
+  }, [autoSave]);
+
+  // Load saved workflow on mount
+  useEffect(() => {
+    if (reactFlowInstance && nodes.length === INITIAL_NODES.length && edges.length === INITIAL_EDGES.length) {
+      setTimeout(() => {
+        const saved = loadFromLocalStorage();
+        if (saved && saved.nodes && saved.nodes.length > 0) {
+          const shouldLoad = window.confirm('Found an auto-saved workflow. Would you like to restore it?');
+          if (shouldLoad) {
+            const { x = 0, y = 0, zoom = 1 } = saved.viewport || {};
+            setNodes(saved.nodes || []);
+            setEdges(saved.edges || []);
+            setTimeout(() => {
+              if (reactFlowInstance) {
+                reactFlowInstance.setViewport({ x, y, zoom });
+              }
+            }, 100);
+            console.log('📂 Loaded auto-saved workflow');
+          }
+        }
+      }, 1000);
+    }
+  }, [reactFlowInstance, setNodes, setEdges]);
 
   return (
     <div className="w-full h-full relative" ref={reactFlowWrapper}>
@@ -397,7 +513,6 @@ const FlowboardContent = () => {
         nodeTypes={memoizedNodeTypes}
         edgeTypes={memoizedEdgeTypes}
         {...FLOW_CONFIG}
-        // Enhanced configuration
         deleteKeyCode="Delete"
         multiSelectionKeyCode="Meta"
         selectNodesOnDrag={false}
@@ -420,13 +535,13 @@ const FlowboardContent = () => {
           },
         }}
       >
-      <Background
-  variant="dots"
-  gap={20}
-  size={3}
-  color="#94a3b8"
-  style={{ opacity: 0.8 }}
-/>
+        <Background
+          variant="dots"
+          gap={20}
+          size={3}
+          color="#94a3b8"
+          style={{ opacity: 0.8 }}
+        />
 
         <Controls
           showZoom={true}
@@ -441,6 +556,7 @@ const FlowboardContent = () => {
             }
           }}
         />
+
         <MiniMap
           nodeColor={(node) => {
             const colors = {
@@ -452,7 +568,8 @@ const FlowboardContent = () => {
               parseNode: '#8b5cf6',
               chunkNode: '#10b981',
               vectorizeNode: '#f97316',
-              textNode: '#6b7280'
+              textNode: '#6b7280',
+              readmeNode: '#f59e0b'
             };
             return colors[node.type] || '#9ca3af';
           }}
@@ -468,12 +585,18 @@ const FlowboardContent = () => {
         />
       </ReactFlow>
 
-      {/* Floating UI Components */}
+      {/* Auto-save indicator */}
+      {lastSaved && (
+        <div className="absolute top-4 right-4 bg-green-100 text-green-800 px-2 py-1 rounded text-xs z-10">
+          Auto-saved: {new Date(lastSaved).toLocaleTimeString()}
+        </div>
+      )}
 
+      {/* Floating UI Components */}
       <ChatWindow />
 
       {/* Enhanced Stats Panel */}
-      <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm text-gray-800 p-3 rounded-lg shadow-lg border border-gray-200 text-xs font-mono">
+      <div className="absolute top-20 right-4 bg-white/90 backdrop-blur-sm text-gray-800 p-3 rounded-lg shadow-lg border border-gray-200 text-xs font-mono z-10">
         <div className="space-y-1">
           <div className="flex justify-between">
             <span>Nodes:</span>
@@ -499,12 +622,14 @@ const FlowboardContent = () => {
       </div>
 
       {/* Keyboard Shortcuts Help */}
-      <div className="absolute bottom-4 left-4 bg-black/80 text-white p-2 rounded text-xs opacity-0 hover:opacity-100 transition-opacity">
+      <div className="absolute bottom-4 left-4 bg-black/80 text-white p-2 rounded text-xs opacity-0 hover:opacity-100 transition-opacity z-10">
         <div className="space-y-1">
           <div><kbd>Del</kbd> Delete selected</div>
           <div><kbd>F</kbd> Fit view</div>
           <div><kbd>Cmd+A</kbd> Select all</div>
           <div><kbd>Esc</kbd> Deselect all</div>
+          <div><kbd>Cmd+S</kbd> Quick save</div>
+          <div><kbd>Cmd+E</kbd> Export</div>
         </div>
       </div>
     </div>

@@ -11,6 +11,7 @@
     "@testing-library/user-event": "^13.5.0",
     "@xyflow/react": "^12.6.4",
     "framer-motion": "^12.16.0",
+    "gsap": "^3.13.0",
     "react": "^19.1.0",
     "react-bits": "^1.0.5",
     "react-dom": "^19.1.0",

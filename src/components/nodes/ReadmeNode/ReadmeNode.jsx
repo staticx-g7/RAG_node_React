@@ -541,195 +541,160 @@ const ReadmeNode = ({ id, data, selected }) => {
       if (settings.includeLicense) sections.push('- **License**: License information');
 
       // PROJECT-FOCUSED PROMPT - NO AI INTRODUCTION
-const prompt = `Create a comprehensive README.md file for this repository. Output ONLY the final README content in Markdown format.
+const prompt = `Create a comprehensive README.md file for this software project. Analyze the provided codebase and generate ONLY the final README content in Markdown format.
 
-**UNIVERSAL PROJECT ANALYSIS:**
-Analyze the following codebase and automatically detect:
+**Repository Analysis:**
 ${context}
 
-**INTELLIGENT PROJECT DETECTION:**
-Based on the code analysis, automatically identify:
-- Programming languages used (JavaScript, Python, Java, C++, Go, Rust, PHP, Ruby, C#, Swift, Kotlin, Dart, etc.)
-- Framework/Technology stack (React, Vue, Angular, Django, Flask, Spring, Express, Laravel, Rails, .NET, etc.)
-- Build systems (npm, pip, Maven, Gradle, CMake, Cargo, Composer, etc.)
-- Development tools (Docker, Kubernetes, CI/CD, testing frameworks)
-- Project type (Web App, Mobile App, Desktop App, CLI Tool, Library, API, Game, etc.)
+**Universal README Structure:**
 
-**ADAPTIVE SECTION GENERATION:**
-Include sections based on detected project type:
+**1. Project Title & Description:**
+- Start with clear project name based on repository analysis
+- Brief description of what this software does
+- Key value proposition and main purpose
 
-**For Web Applications:**
-- Live demo links and screenshots
+**2. Technology Detection & Stack:**
+- Automatically detect programming languages used
+- Identify frameworks, libraries, and tools
+- List build systems and package managers found
+- Note database systems or external services
+
+**3. Features Section:**
+- Core functionality based on code analysis
+- Key capabilities and use cases
+- Notable technical features
+
+**4. Installation Instructions:**
+- Detect package manager (npm, pip, cargo, maven, etc.)
+- Provide appropriate installation commands
+- Include system requirements and dependencies
+- Environment setup if configuration files detected
+
+**5. Usage Instructions:**
+- Main entry points and how to run the application
+- Command-line usage if CLI tools detected
+- API usage if web services detected
+- Configuration options if config files found
+
+**6. Project Structure:**
+- Explain directory organization
+- Document important files and their purposes
+- Describe module/component architecture
+
+**7. Development Setup:**
+- How to set up development environment
+- Build commands and scripts
+- Testing procedures if test files detected
+- Debugging and development tools
+
+**8. API Documentation (if applicable):**
+- REST endpoints if web API detected
+- GraphQL schema if GraphQL found
+- WebSocket connections if real-time features
+- Authentication methods
+
+**9. Configuration:**
+- Environment variables if .env files detected
+- Configuration files and their purposes
+- Deployment settings
+
+**10. Contributing:**
+- How to contribute to the project
+- Code style and standards
+- Pull request process
+- Issue reporting
+
+**11. License & Contact:**
+- License information if LICENSE file detected
+- Contact information and support
+
+**Language-Specific Adaptations:**
+
+**For JavaScript/TypeScript Projects:**
+- npm/yarn commands, package.json scripts
+- Node.js version requirements
+- Frontend/backend separation if applicable
+
+**For Python Projects:**
+- pip/conda installation, requirements.txt
+- Virtual environment setup
+- Python version compatibility
+
+**For Java Projects:**
+- Maven/Gradle build instructions
+- JDK version requirements
+- JAR/WAR deployment
+
+**For C/C++ Projects:**
+- Compiler requirements (GCC, Clang, MSVC)
+- CMake/Make build instructions
+- Library dependencies
+
+**For Go Projects:**
+- Go modules and version requirements
+- Build and install commands
+- Cross-compilation instructions
+
+**For Rust Projects:**
+- Cargo commands and features
+- Rust edition and MSRV
+- Binary/library distinction
+
+**For Web Projects:**
 - Browser compatibility
-- Environment variables and configuration
-- API endpoints and documentation
-- Database setup and migrations
+- Build tools (Webpack, Vite, etc.)
+- Deployment instructions
 
-**For Mobile Applications:**
-- Platform support (iOS/Android)
-- App store links
-- Device requirements
-- Build and deployment instructions
-- Screenshots and app preview
-
-**For Desktop Applications:**
-- Supported operating systems
-- Installation packages/binaries
-- System requirements
-- GUI screenshots
-
-**For Libraries/Frameworks:**
-- Installation via package managers
-- API reference and examples
-- Integration guides
-- Version compatibility
-
-**For CLI Tools:**
-- Command-line usage examples
-- Available flags and options
-- Configuration files
-- Shell completion
-
-**For Games:**
-- Gameplay screenshots/videos
-- Controls and mechanics
-- System requirements
-- Save game locations
+**For Mobile Projects:**
+- Platform requirements (iOS/Android)
+- SDK versions and dependencies
+- Build and deployment process
 
 **For Data Science/ML Projects:**
-- Dataset information
-- Model architecture
-- Training instructions
-- Jupyter notebook examples
+- Dataset requirements and sources
+- Model training instructions
+- Jupyter notebook usage
 - Results and visualizations
 
 **For DevOps/Infrastructure:**
-- Infrastructure diagrams
+- Infrastructure as Code tools
 - Deployment pipelines
 - Monitoring and logging
 - Security considerations
 
-**LANGUAGE-SPECIFIC INSTRUCTIONS:**
+**Writing Guidelines:**
+- Use clear, technical language appropriate for developers
+- Include practical code examples with proper syntax highlighting
+- Focus on getting the project running quickly
+- Provide troubleshooting for common issues
+- Use proper markdown formatting throughout
+- Add badges for build status, version, license if appropriate
+- Keep explanations concise but comprehensive
+- Avoid marketing language - focus on technical facts
 
-**JavaScript/TypeScript Projects:**
-- Package.json scripts explanation
-- Node.js version requirements
-- Browser/Node compatibility
-- TypeScript compilation steps
+**Auto-Detection Rules:**
+- Detect project type from file extensions and structure
+- Identify entry points (main.py, index.js, main.go, etc.)
+- Find configuration files and explain their purpose
+- Locate test directories and testing frameworks
+- Identify CI/CD configurations
+- Find documentation and example files
 
-**Python Projects:**
-- Virtual environment setup
-- Requirements.txt/pyproject.toml
-- Python version compatibility
-- Conda/pip installation
+**Tone:** Professional and technical, focused on practical usage
 
-**Java Projects:**
-- JDK version requirements
-- Maven/Gradle build commands
-- JAR/WAR deployment
-- IDE setup instructions
+**Avoid:**
+- Generic technology explanations
+- Marketing buzzwords
+- Theoretical background unless necessary
+- Assumptions about user knowledge level
 
-**C/C++ Projects:**
-- Compiler requirements (GCC, Clang, MSVC)
-- CMake/Make build instructions
-- Library dependencies
-- Platform-specific compilation
+**Focus on:**
+- Practical steps to use THIS specific project
+- Real examples from the actual codebase
+- Specific commands and configurations
+- Actual file names and directory structure
 
-**Go Projects:**
-- Go version requirements
-- Module dependencies
-- Cross-compilation instructions
-- Binary distribution
-
-**Rust Projects:**
-- Cargo commands and features
-- Rust edition compatibility
-- Cross-compilation targets
-- Performance benchmarks
-
-**PHP Projects:**
-- PHP version requirements
-- Composer dependencies
-- Web server configuration
-- Framework-specific setup
-
-**Ruby Projects:**
-- Ruby version and gemset
-- Bundler installation
-- Rails-specific commands
-- Deployment instructions
-
-**C# Projects:**
-- .NET version requirements
-- NuGet package restoration
-- Visual Studio setup
-- Deployment options
-
-**Swift/iOS Projects:**
-- Xcode version requirements
-- CocoaPods/Swift Package Manager
-- iOS version compatibility
-- App Store submission
-
-**Android/Kotlin Projects:**
-- Android SDK requirements
-- Gradle build variants
-- Play Store deployment
-- ProGuard/R8 configuration
-
-**UNIVERSAL SECTIONS TO INCLUDE:**
-${sections.join('\n')}
-
-**COMPREHENSIVE REQUIREMENTS:**
-- Start immediately with project title and compelling description
-- Use ${settings.tone} writing style
-- Detect and include appropriate badges (build status, version, downloads, etc.)
-- Add table of contents for complex projects
-- Include practical code examples with syntax highlighting
-- Provide troubleshooting section for common issues
-- Add contribution guidelines appropriate to the project type
-- Include license information if detected
-- Add contact/support information
-- Keep under ${settings.maxTokens * 4} characters
-- Use proper Markdown formatting throughout
-
-**ADVANCED FEATURES TO DETECT AND DOCUMENT:**
-- Microservices architecture
-- Containerization (Docker, Podman)
-- Cloud deployment (AWS, GCP, Azure)
-- Database integrations (SQL, NoSQL)
-- Authentication systems
-- Real-time features (WebSockets, SSE)
-- Caching strategies
-- Testing frameworks and coverage
-- Performance monitoring
-- Security implementations
-- Internationalization
-- Accessibility features
-- Progressive Web App features
-- Offline capabilities
-
-**SPECIAL HANDLING FOR:**
-- Monorepos (document each package/service)
-- Legacy codebases (migration guides)
-- Experimental projects (disclaimers and roadmaps)
-- Academic projects (citations and methodology)
-- Open source projects (community guidelines)
-- Enterprise projects (compliance and security)
-- Educational projects (learning objectives)
-
-**OUTPUT REQUIREMENTS:**
-- Generate ONLY the final README content
-- No meta-commentary or thinking process
-- Start immediately with the project title
-- Use appropriate emoji sparingly for visual appeal
-- Include code blocks with proper language tags
-- Add links to relevant external resources
-- Ensure all sections flow logically
-- Make it engaging and informative for developers
-
-Begin the README immediately:`;
-
+Begin the README immediately with the project title based on repository analysis:`;
 
 // Construct API endpoint - EXACT same as ChatNode
 let chatEndpoint;
