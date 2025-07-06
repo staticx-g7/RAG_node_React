@@ -25,7 +25,16 @@ const initialState = {
     maxFileSize: 1000000,
     minFileSize: 100,
     includeHidden: false,
-    filteredFiles: []
+    filteredFiles: [],
+
+    // ADD THESE MISSING PROPERTIES:
+    repoStructure: null,
+    expandedPaths: new Set(['/']),
+    checkedFolders: new Set(['/']),
+    step: 1,
+    detectedFormats: new Map(),
+    availableFiles: [],
+    selectedFiles: new Set()
   },
   chunk: {
     chunkMethod: 'character',
@@ -42,12 +51,12 @@ const initialState = {
     dimensions: 1024,
     batchSize: 100,
     rateLimit: 1000,
-    storageType: 'indexeddb', // Changed default to IndexedDB
+    storageType: 'indexeddb',
     vectors: [],
     customKeys: [
       { key: 'source', value: 'repository', enabled: true },
       { key: 'timestamp', value: new Date().toISOString(), enabled: true }
-    ]
+    ] 
   },
   chat: {
     model: 'gpt-4',

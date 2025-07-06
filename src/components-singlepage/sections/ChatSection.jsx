@@ -241,32 +241,89 @@ const ChatSection = () => {
   }, []);
 
   // Build context from repository data
-  const buildRepositoryContext = useCallback(() => {
-    if (!settings.useRepositoryContext) return '';
+  // In ChatSection.jsx buildRepositoryContext function
+const buildRepositoryContext = useCallback(() => {
+  if (!settings.useRepositoryContext) return '';
 
-    let context = '';
+  let context = '';
 
-    // Add repository information
-    if (git.repoInfo) {
-      context += `Repository: ${git.repoInfo.fullName}\n`;
-      context += `Description: ${git.repoInfo.description || 'No description'}\n`;
-      context += `Language: ${git.repoInfo.language || 'Multiple'}\n\n`;
-    }
+  // Add repository information
+  if (git.repoInfo) {
+    context += `Repository: ${git.repoInfo.fullName}\n`;
+    context += `Description: ${git.repoInfo.description || 'No description'}\n`;
+    context += `Language: ${git.repoInfo.language || 'Multiple'}\n\n`;
+  }
 
-    // Add vector context if available
-    if (vectorize.vectors && vectorize.vectors.length > 0) {
-      context += `Available code context from ${vectorize.vectors.length} code chunks:\n`;
+  // DEBUG: Log what we have
+  console.log('🔍 Building context with:');
+  console.log('- Filtered files:', filter.filteredFiles?.length || 0);
+  console.log('- Processed chunks:', chunk.processedChunks?.length || 0);
+  console.log('- Vectors:', vectorize.vectors?.length || 0);
 
-      // Use first few vectors as context (limit to avoid token overflow)
-      const contextVectors = vectorize.vectors.slice(0, 5);
-      contextVectors.forEach((vector, index) => {
-        context += `\n[Chunk ${index + 1}] ${vector.metadata.source}:\n`;
-        context += `${vector.content.substring(0, 300)}...\n`;
-      });
-    }
+  // Add filtered files information
+  if (filter.filteredFiles && filter.filteredFiles.length > 0) {
+    context += `Selected files from repository (${filter.filteredFiles.length} files):\n`;
 
-    return context;
-  }, [settings.useRepositoryContext, git.repoInfo, vectorize.vectors]);
+    // Group files by extension
+    const filesByType = {};
+    filter.filteredFiles.forEach(file => {
+      const ext = file.path.split('.').pop() || 'unknown';
+      if (!filesByType[ext]) filesByType[ext] = [];
+      filesByType[ext].push(file);
+    });
+
+    Object.entries(filesByType).forEach(([ext, files]) => {
+      context += `- ${ext.toUpperCase()} files (${files.length}): ${files.map(f => f.path).join(', ')}\n`;
+    });
+    context += '\n';
+  }
+
+  // Add vector context with specific focus on code files
+  if (vectorize.vectors && vectorize.vectors.length > 0) {
+    context += `Available vectorized code context from ${vectorize.vectors.length} code chunks:\n`;
+
+    // Check for .cpp files specifically
+    const cppVectors = vectorize.vectors.filter(v =>
+      v.metadata.source?.includes('.cpp')
+    );
+    console.log('🔧 CPP vectors found:', cppVectors.length);
+
+    // Prioritize .cpp files and other code files
+    const codeVectors = vectorize.vectors.filter(v => {
+      const source = v.metadata.source || '';
+      return source.includes('.cpp') || source.includes('.h') ||
+             source.includes('.js') || source.includes('.jsx') ||
+             source.includes('.ts') || source.includes('.tsx') ||
+             source.includes('.py');
+    });
+
+    // Use a mix of code vectors, prioritizing .cpp
+    const contextVectors = [
+      ...codeVectors.filter(v => v.metadata.source?.includes('.cpp')).slice(0, 3),
+      ...codeVectors.filter(v => !v.metadata.source?.includes('.cpp')).slice(0, 2)
+    ].slice(0, 5);
+
+    contextVectors.forEach((vector, index) => {
+      const fileType = vector.metadata.source?.split('.').pop()?.toUpperCase() || 'CODE';
+      context += `\n[${fileType} Chunk ${index + 1}] ${vector.metadata.source}:\n`;
+      context += `${vector.content.substring(0, 400)}...\n`;
+    });
+
+    // Add summary of available file types
+    const vectorFileTypes = {};
+    vectorize.vectors.forEach(v => {
+      const ext = v.metadata.source?.split('.').pop() || 'unknown';
+      vectorFileTypes[ext] = (vectorFileTypes[ext] || 0) + 1;
+    });
+
+    context += `\nVectorized file types available: ${Object.entries(vectorFileTypes)
+      .map(([ext, count]) => `${ext}(${count})`)
+      .join(', ')}\n`;
+  }
+
+  return context;
+}, [settings.useRepositoryContext, git.repoInfo, vectorize.vectors, filter.filteredFiles, chunk.processedChunks]);
+
 
   // Send message
   const handleSendMessage = useCallback(async () => {

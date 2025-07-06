@@ -1,5 +1,5 @@
 // components-singlepage/sections/FilterSection.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { usePipeline } from '../../contexts/PipelineContext';
 
 // Enhanced Tree Component with Checkboxes
@@ -131,7 +131,7 @@ const getFileIcon = (filename) => {
   const ext = filename.split('.').pop()?.toLowerCase();
   const iconMap = {
     js: '📄', jsx: '⚛️', ts: '📘', tsx: '⚛️',
-    py: '🐍', java: '☕', cpp: '⚙️', c: '⚙️',
+    py: '🐍', java: '☕', cpp: '⚙️', c: '⚙️', h: '🔧',
     html: '🌐', css: '🎨', scss: '🎨', sass: '🎨',
     json: '📋', xml: '📄', yaml: '📄', yml: '📄',
     md: '📝', txt: '📄', pdf: '📕',
@@ -157,40 +157,62 @@ const FilterSection = () => {
   const { state, dispatch } = usePipeline();
   const { git, filter } = state;
 
+  // Local processing state only (not persistent data)
   const [localState, setLocalState] = useState({
     isLoading: false,
     error: null,
-    repoStructure: null,
-    expandedPaths: new Set(['/']),
-    checkedFolders: new Set(['/']) // Include root by default
+    fileStats: {
+      totalFiles: 0,
+      totalFolders: 0,
+      selectedFiles: 0,
+      totalSize: 0
+    }
   });
 
-  const [step, setStep] = useState(1); // 1: Folders, 2: Formats, 3: Files
-  const [detectedFormats, setDetectedFormats] = useState(new Map());
-  const [selectedFormats, setSelectedFormats] = useState(new Set());
-  const [availableFiles, setAvailableFiles] = useState([]);
-  const [selectedFiles, setSelectedFiles] = useState(new Set());
+  // Get persistent state from pipeline context
+  const {
+    repoStructure = null,
+    expandedPaths = new Set(['/']),
+    checkedFolders = new Set(['/']),
+    step = 1,
+    detectedFormats = new Map(),
+    selectedFormats = new Set(),
+    availableFiles = [],
+    selectedFiles = new Set(),
+    filteredFiles = []
+  } = filter;
+
+  // Update filter state helper
+  const updateFilterState = useCallback((updates) => {
+    dispatch({
+      type: 'UPDATE_FILTER',
+      payload: {
+        ...filter,
+        ...updates
+      }
+    });
+  }, [dispatch, filter]);
 
   // Fetch repository structure when git connection is available
   useEffect(() => {
-    if (git.isConnected && git.owner && git.repo && git.branch) {
+    if (git.isConnected && git.owner && git.repo && git.branch && !repoStructure) {
       fetchRepositoryStructure();
     }
-  }, [git.isConnected, git.owner, git.repo, git.branch]);
+  }, [git.isConnected, git.owner, git.repo, git.branch, repoStructure]);
 
   // Auto-detect formats when folders are selected
   useEffect(() => {
-    if (localState.repoStructure && localState.checkedFolders.size > 0) {
+    if (repoStructure && checkedFolders.size > 0) {
       detectFileFormats();
     }
-  }, [localState.checkedFolders, localState.repoStructure]);
+  }, [checkedFolders, repoStructure]);
 
   // Update available files when formats are selected
   useEffect(() => {
     if (selectedFormats.size > 0) {
       updateAvailableFiles();
     }
-  }, [selectedFormats, localState.checkedFolders, localState.repoStructure]);
+  }, [selectedFormats, checkedFolders, repoStructure]);
 
   const fetchRepositoryStructure = async () => {
     setLocalState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -216,11 +238,16 @@ const FilterSection = () => {
 
       const treeData = await treeResponse.json();
       const structure = buildTreeStructure(treeData.tree);
+      const stats = calculateFileStats(treeData.tree);
+
+      updateFilterState({
+        repoStructure: structure
+      });
 
       setLocalState(prev => ({
         ...prev,
         isLoading: false,
-        repoStructure: structure
+        fileStats: stats
       }));
 
     } catch (error) {
@@ -291,6 +318,26 @@ const FilterSection = () => {
     return root;
   };
 
+  const calculateFileStats = (treeItems) => {
+    const stats = {
+      totalFiles: 0,
+      totalFolders: 0,
+      selectedFiles: 0,
+      totalSize: 0
+    };
+
+    treeItems.forEach(item => {
+      if (item.type === 'blob') {
+        stats.totalFiles++;
+        stats.totalSize += item.size || 0;
+      } else {
+        stats.totalFolders++;
+      }
+    });
+
+    return stats;
+  };
+
   const detectFileFormats = () => {
     const formats = new Map();
 
@@ -309,7 +356,7 @@ const FilterSection = () => {
       if (node.children) {
         node.children.forEach(child => {
           // Only scan if this folder is selected or if it's a child of selected folder
-          const isInSelectedFolder = Array.from(localState.checkedFolders).some(folderPath =>
+          const isInSelectedFolder = Array.from(checkedFolders).some(folderPath =>
             child.path.startsWith(folderPath) || folderPath === '/'
           );
 
@@ -320,21 +367,23 @@ const FilterSection = () => {
       }
     };
 
-    if (localState.repoStructure) {
-      scanNode(localState.repoStructure);
+    if (repoStructure) {
+      scanNode(repoStructure);
     }
 
-    setDetectedFormats(formats);
-
     // Auto-select common formats
-    const commonFormats = ['.js', '.jsx', '.ts', '.tsx', '.py', '.md', '.json', '.css'];
+    const commonFormats = ['.js', '.jsx', '.ts', '.tsx', '.py', '.md', '.json', '.css', '.cpp', '.h', '.c'];
     const autoSelected = new Set();
     commonFormats.forEach(format => {
       if (formats.has(format)) {
         autoSelected.add(format);
       }
     });
-    setSelectedFormats(autoSelected);
+
+    updateFilterState({
+      detectedFormats: formats,
+      selectedFormats: autoSelected
+    });
   };
 
   const updateAvailableFiles = () => {
@@ -353,7 +402,7 @@ const FilterSection = () => {
 
       if (node.children) {
         node.children.forEach(child => {
-          const isInSelectedFolder = Array.from(localState.checkedFolders).some(folderPath =>
+          const isInSelectedFolder = Array.from(checkedFolders).some(folderPath =>
             child.path.startsWith(folderPath) || folderPath === '/'
           );
 
@@ -364,37 +413,37 @@ const FilterSection = () => {
       }
     };
 
-    if (localState.repoStructure) {
-      scanNode(localState.repoStructure);
+    if (repoStructure) {
+      scanNode(repoStructure);
     }
 
-    setAvailableFiles(files);
     // Auto-select all files initially
-    setSelectedFiles(new Set(files.map(f => f.path)));
+    const autoSelectedFiles = new Set(files.map(f => f.path));
+
+    updateFilterState({
+      availableFiles: files,
+      selectedFiles: autoSelectedFiles
+    });
   };
 
   const handleToggleExpand = (path) => {
-    setLocalState(prev => {
-      const newExpanded = new Set(prev.expandedPaths);
-      if (newExpanded.has(path)) {
-        newExpanded.delete(path);
-      } else {
-        newExpanded.add(path);
-      }
-      return { ...prev, expandedPaths: newExpanded };
-    });
+    const newExpanded = new Set(expandedPaths);
+    if (newExpanded.has(path)) {
+      newExpanded.delete(path);
+    } else {
+      newExpanded.add(path);
+    }
+    updateFilterState({ expandedPaths: newExpanded });
   };
 
   const handleCheckFolder = (path, checked) => {
-    setLocalState(prev => {
-      const newChecked = new Set(prev.checkedFolders);
-      if (checked) {
-        newChecked.add(path);
-      } else {
-        newChecked.delete(path);
-      }
-      return { ...prev, checkedFolders: newChecked };
-    });
+    const newChecked = new Set(checkedFolders);
+    if (checked) {
+      newChecked.add(path);
+    } else {
+      newChecked.delete(path);
+    }
+    updateFilterState({ checkedFolders: newChecked });
   };
 
   const handleFormatToggle = (format) => {
@@ -404,7 +453,7 @@ const FilterSection = () => {
     } else {
       newFormats.add(format);
     }
-    setSelectedFormats(newFormats);
+    updateFilterState({ selectedFormats: newFormats });
   };
 
   const handleFileToggle = (filePath) => {
@@ -414,19 +463,25 @@ const FilterSection = () => {
     } else {
       newFiles.add(filePath);
     }
-    setSelectedFiles(newFiles);
+    updateFilterState({ selectedFiles: newFiles });
+  };
+
+  const setStep = (newStep) => {
+    updateFilterState({ step: newStep });
   };
 
   const applyFilters = () => {
-    const filteredFiles = availableFiles.filter(file => selectedFiles.has(file.path));
+    const filteredFilesList = availableFiles.filter(file => selectedFiles.has(file.path));
 
-    dispatch({
-      type: 'UPDATE_FILTER',
-      payload: {
-        selectedFolders: localState.checkedFolders,
-        selectedFormats: selectedFormats,
-        filteredFiles: filteredFiles
-      }
+    updateFilterState({
+      filteredFiles: filteredFilesList
+    });
+
+    console.log('🔧 Applied filters:', {
+      selectedFolders: checkedFolders.size,
+      selectedFormats: selectedFormats.size,
+      finalFiles: filteredFilesList.length,
+      cppFiles: filteredFilesList.filter(f => f.path.includes('.cpp')).length
     });
   };
 
@@ -456,6 +511,23 @@ const FilterSection = () => {
       <div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">File Filtering</h1>
         <p className="text-gray-600">Select folders, then file formats, then specific files to include in your RAG pipeline.</p>
+      </div>
+
+      {/* Repository Info */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-blue-800">Connected Repository</h3>
+            <p className="text-blue-600 text-sm">{git.owner}/{git.repo} • {git.branch}</p>
+          </div>
+          <button
+            onClick={fetchRepositoryStructure}
+            disabled={localState.isLoading}
+            className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {localState.isLoading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Progress Steps */}
@@ -500,13 +572,13 @@ const FilterSection = () => {
               <div className="p-4 text-red-600">
                 <span className="font-medium">Error:</span> {localState.error}
               </div>
-            ) : localState.repoStructure ? (
+            ) : repoStructure ? (
               <TreeNode
-                node={localState.repoStructure}
+                node={repoStructure}
                 onToggle={handleToggleExpand}
                 onCheck={handleCheckFolder}
-                expandedPaths={localState.expandedPaths}
-                checkedPaths={localState.checkedFolders}
+                expandedPaths={expandedPaths}
+                checkedPaths={checkedFolders}
                 showCheckboxes={true}
               />
             ) : null}
@@ -514,11 +586,11 @@ const FilterSection = () => {
 
           <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex justify-between items-center">
             <span className="text-sm text-gray-600">
-              {localState.checkedFolders.size} folders selected
+              {checkedFolders.size} folders selected
             </span>
             <button
               onClick={() => setStep(2)}
-              disabled={localState.checkedFolders.size === 0}
+              disabled={checkedFolders.size === 0}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
             >
               Next: File Formats →
@@ -631,13 +703,13 @@ const FilterSection = () => {
       )}
 
       {/* Results Summary */}
-      {step === 3 && selectedFiles.size > 0 && (
+      {filteredFiles.length > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <h3 className="font-semibold text-green-800 mb-2">📊 Filter Results</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <div className="text-green-600 font-medium">Selected Folders</div>
-              <div className="text-green-800">{localState.checkedFolders.size}</div>
+              <div className="text-green-800">{checkedFolders.size}</div>
             </div>
             <div>
               <div className="text-green-600 font-medium">File Formats</div>
@@ -645,12 +717,15 @@ const FilterSection = () => {
             </div>
             <div>
               <div className="text-green-600 font-medium">Final Files</div>
-              <div className="text-green-800">{selectedFiles.size}</div>
+              <div className="text-green-800">{filteredFiles.length}</div>
             </div>
             <div>
-              <div className="text-green-600 font-medium">Next Step</div>
-              <div className="text-green-800">Text Processing</div>
+              <div className="text-green-600 font-medium">CPP Files</div>
+              <div className="text-green-800">{filteredFiles.filter(f => f.path.includes('.cpp')).length}</div>
             </div>
+          </div>
+          <div className="mt-2 text-sm text-green-700">
+            <strong>Next Step:</strong> Go to "Text Processing" to chunk these files for vectorization.
           </div>
         </div>
       )}
